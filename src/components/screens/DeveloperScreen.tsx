@@ -171,7 +171,7 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
 
         <div className="flex items-center justify-between bg-card-elevated p-3 rounded-xl border border-border text-xs font-mono">
           <span className="text-text-secondary tracking-wider">
-            {showKey ? apiKey : 'ast_live_••••••••••••••••••••••••••••••••'}
+            {showKey ? apiKey : 'shlt_live_••••••••••••••••••••••••••••••••'}
           </span>
           <button
             onClick={() => setShowKey(!showKey)}

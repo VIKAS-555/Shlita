@@ -1,9 +1,39 @@
+# Dependencies
 node_modules/
+
+# Build & compiled outputs
 dist/
 dist-ui/
-.env
-.env.local
-.DS_Store
-*.log
 coverage/
 .turbo/
+
+# Environment files & secret configurations
+.env
+.env.*
+*.env
+*.local
+
+# Solana & Web3 Keypairs & Wallets
+*id.json
+*keypair*.json
+*-wallet.json
+secrets.json
+credentials.json
+client_secret*.json
+
+# Cryptographic Keys & Certificates
+*.pem
+*.key
+*.pkcs12
+*.pfx
+*.p12
+*id_rsa*
+*id_ed25519*
+*id_ecdsa*
+
+# Operating System & Editor Artifacts
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
