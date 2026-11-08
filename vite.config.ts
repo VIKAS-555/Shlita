@@ -1,4 +1,5 @@
-import { defineConfig } from 'vite';
+/// <reference types="vitest" />
+import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
@@ -10,5 +11,12 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist-ui',
+  },
+  test: {
+    server: {
+      deps: {
+        external: ['node:sqlite'],
+      },
+    },
   },
 });

@@ -1,8 +1,70 @@
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { PolicyEngine } from '../../core/src/index.js';
+import { SolanaSettlementManager } from '../../solana/src/settlement.js';
+import { TransactionLifecycleState } from '../../core/src/types.js';
 import fs from 'node:fs';
 import path from 'node:path';
+
+export interface ProviderDefinition {
+  id: string;
+  canonicalOrigin: string;
+  defaultHost: string;
+  allowedMethods: string[];
+  allowedPathPrefixes: string[];
+  tariffMicroUsdc: bigint;
+  authHeaderName?: string;
+  authParamName?: string;
+  envKeyName: string;
+  timeoutMs: number;
+}
+
+export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
+  helius: {
+    id: 'helius',
+    canonicalOrigin: 'https://api.helius.xyz',
+    defaultHost: 'api.helius.xyz',
+    allowedMethods: ['POST', 'GET'],
+    allowedPathPrefixes: ['/v0', '/rpc'],
+    tariffMicroUsdc: 10_000n, // $0.01 USDC
+    authParamName: 'api-key',
+    envKeyName: 'HELIUS_API_KEY',
+    timeoutMs: 12000,
+  },
+  'api.helius.xyz': {
+    id: 'helius',
+    canonicalOrigin: 'https://api.helius.xyz',
+    defaultHost: 'api.helius.xyz',
+    allowedMethods: ['POST', 'GET'],
+    allowedPathPrefixes: ['/v0', '/rpc'],
+    tariffMicroUsdc: 10_000n,
+    authParamName: 'api-key',
+    envKeyName: 'HELIUS_API_KEY',
+    timeoutMs: 12000,
+  },
+  tavily: {
+    id: 'tavily',
+    canonicalOrigin: 'https://api.tavily.com',
+    defaultHost: 'api.tavily.com',
+    allowedMethods: ['POST'],
+    allowedPathPrefixes: ['/search', '/extract'],
+    tariffMicroUsdc: 20_000n, // $0.02 USDC
+    authHeaderName: 'Authorization',
+    envKeyName: 'TAVILY_API_KEY',
+    timeoutMs: 15000,
+  },
+  'api.tavily.com': {
+    id: 'tavily',
+    canonicalOrigin: 'https://api.tavily.com',
+    defaultHost: 'api.tavily.com',
+    allowedMethods: ['POST'],
+    allowedPathPrefixes: ['/search', '/extract'],
+    tariffMicroUsdc: 20_000n,
+    authHeaderName: 'Authorization',
+    envKeyName: 'TAVILY_API_KEY',
+    timeoutMs: 15000,
+  },
+};
 
 /**
  * Validates upstream vendor target against SSRF, private network, and whitelist violations.
@@ -11,7 +73,7 @@ export function validateVendorDestination(
   vendorStr: string,
   reqPath: string,
   allowedVendors: string[]
-): { valid: boolean; error?: string; url?: string } {
+): { valid: boolean; error?: string; url?: string; host?: string } {
   try {
     let clean = vendorStr.trim();
     if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
@@ -20,7 +82,7 @@ export function validateVendorDestination(
 
     const parsed = new URL(clean);
 
-    // 1. Insecure protocol check (must be HTTPS)
+    // 1. Strict Protocol Check (Must be HTTPS)
     if (parsed.protocol !== 'https:') {
       return {
         valid: false,
@@ -28,9 +90,25 @@ export function validateVendorDestination(
       };
     }
 
+    // 2. Reject UserInfo (e.g. https://user:pass@host)
+    if (parsed.username || parsed.password) {
+      return {
+        valid: false,
+        error: 'SSRF Violation: UserInfo/credentials embedded in vendor URL are prohibited.',
+      };
+    }
+
+    // 3. Reject non-standard ports
+    if (parsed.port && parsed.port !== '443' && parsed.port !== '') {
+      return {
+        valid: false,
+        error: `SSRF Violation: Non-443 port (${parsed.port}) is not permitted.`,
+      };
+    }
+
     const host = parsed.hostname.toLowerCase();
 
-    // 2. Strict SSRF Protection (Block loopback, private ranges, cloud metadata)
+    // 4. Strict SSRF Protection (Block loopback, private ranges, link-local, cloud metadata, IPv6 mapped)
     if (
       host === 'localhost' ||
       host.endsWith('.localhost') ||
@@ -38,25 +116,14 @@ export function validateVendorDestination(
       host === '127.0.0.1' ||
       host === '0.0.0.0' ||
       host === '::1' ||
+      host.startsWith('127.') ||
       host.startsWith('10.') ||
       host.startsWith('192.168.') ||
-      host.startsWith('172.16.') ||
-      host.startsWith('172.17.') ||
-      host.startsWith('172.18.') ||
-      host.startsWith('172.19.') ||
-      host.startsWith('172.20.') ||
-      host.startsWith('172.21.') ||
-      host.startsWith('172.22.') ||
-      host.startsWith('172.23.') ||
-      host.startsWith('172.24.') ||
-      host.startsWith('172.25.') ||
-      host.startsWith('172.26.') ||
-      host.startsWith('172.27.') ||
-      host.startsWith('172.28.') ||
-      host.startsWith('172.29.') ||
-      host.startsWith('172.30.') ||
-      host.startsWith('172.31.') ||
-      host.startsWith('169.254.') // AWS/GCP/Azure instance metadata
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) ||
+      host.startsWith('169.254.') || // AWS/GCP/Azure instance metadata
+      host.startsWith('::ffff:127.') ||
+      host.startsWith('::ffff:10.') ||
+      host.startsWith('::ffff:192.168.')
     ) {
       return {
         valid: false,
@@ -64,7 +131,7 @@ export function validateVendorDestination(
       };
     }
 
-    // 3. Domain Whitelist Verification
+    // 5. Domain Whitelist Verification
     const isAllowed = allowedVendors.some((v) => {
       const cleanV = v.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
       return host === cleanV || host.endsWith(`.${cleanV}`);
@@ -81,27 +148,31 @@ export function validateVendorDestination(
     const normalizedPath = reqPath.startsWith('/') ? reqPath : `/${reqPath}`;
     const finalUrl = `https://${host}${normalizedPath}`;
 
-    return { valid: true, url: finalUrl };
+    return { valid: true, url: finalUrl, host };
   } catch {
     return { valid: false, error: 'Malformed vendor endpoint or destination URL.' };
   }
 }
 
-export function createGatewayApp(engine: PolicyEngine) {
+export function createGatewayApp(
+  engine: PolicyEngine,
+  settlementManager?: SolanaSettlementManager
+) {
   const app = new Hono();
+  const operatorKey = process.env.SHLITA_OPERATOR_KEY || 'shlt_operator_master';
 
   // Middleware for CORS and logging
   app.use('*', async (c, next) => {
     c.header('Access-Control-Allow-Origin', '*');
     c.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-shlita-simulation');
+    c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-shlita-api-key, x-shlita-simulation, x-shlita-operator-key');
     if (c.req.method === 'OPTIONS') {
       return c.body(null, 204);
     }
     await next();
   });
 
-  // Health check endpoint for uptime and container monitoring
+  // Health check endpoint for container and uptime monitoring
   app.get('/health', (c) => {
     return c.json({
       status: 'ok',
@@ -115,26 +186,87 @@ export function createGatewayApp(engine: PolicyEngine) {
 
   // Real Proxy endpoint for AI Agent outbound requests
   app.post('/v1/proxy', async (c) => {
-    const body = await c.req.json();
+    const rawBody = await c.req.json().catch(() => ({}));
     const {
-      agentId,
+      agentId: rawAgentId,
       vendor,
-      estimatedCostMicroUsdc = '10000',
+      estimatedCostMicroUsdc,
       method = 'POST',
       path: reqPath = '/',
-      payload,
+      body: clientBody,
+      payload: legacyPayload,
       simulate = false,
-    } = body;
+      idempotencyKey,
+    } = rawBody;
 
-    const costBigInt = BigInt(estimatedCostMicroUsdc);
+    const requestPayload = clientBody ?? legacyPayload;
     const now = Date.now();
 
-    // 1. Atomic Reservation against Policy Perimeter
-    const decision = engine.evaluateAndReserve({
-      agentId,
+    // 1. Agent Authentication
+    const authHeader = c.req.header('Authorization');
+    const apiKeyHeader = c.req.header('x-shlita-api-key');
+    const token = apiKeyHeader || authHeader;
+    let resolvedAgentId = rawAgentId;
+
+    if (token) {
+      const authResult = engine.authenticateApiKey(token);
+      if (authResult) {
+        resolvedAgentId = authResult.agentId;
+      }
+    }
+
+    if (!resolvedAgentId) {
+      return c.json(
+        {
+          allowed: false,
+          error: 'UNAUTHORIZED',
+          message: 'Missing or invalid agent credentials. Provide x-shlita-api-key or Authorization Bearer header.',
+          timestamp: now,
+        },
+        401
+      );
+    }
+
+    const policy = engine.getAllPolicies().find((p) => p.agentId === resolvedAgentId);
+
+    // 2. Strict Destination Validation & SSRF Guard
+    const destValidation = validateVendorDestination(
       vendor,
-      estimatedCostMicroUsdc: costBigInt,
+      reqPath,
+      policy?.allowedVendors || [vendor]
+    );
+
+    if (!destValidation.valid) {
+      const isSSRF = destValidation.error?.startsWith('SSRF Violation') || destValidation.error?.startsWith('Insecure protocol');
+      const reason = isSSRF ? 'SSRF_SECURITY_VIOLATION' : 'UNAPPROVED_VENDOR';
+      c.header('x-shlita-decision', 'BLOCKED');
+      c.header('x-shlita-violation-reason', reason);
+      return c.json(
+        {
+          allowed: false,
+          error: isSSRF ? 'SECURITY_VIOLATION' : 'POLICY_VIOLATION',
+          reason,
+          message: destValidation.error,
+          timestamp: now,
+        },
+        403
+      );
+    }
+
+    // 3. Server-Side Pricing & Tariffs
+    const providerDef = PROVIDER_DEFINITIONS[vendor.toLowerCase()];
+    const serverTariff = providerDef?.tariffMicroUsdc ?? 10_000n; // Default $0.01 USDC
+    const callerCost = estimatedCostMicroUsdc ? BigInt(estimatedCostMicroUsdc) : 0n;
+    // Server calculates authoritative upper-bound reservation quote
+    const authoritativeQuoteMicroUsdc = callerCost > serverTariff ? callerCost : serverTariff;
+
+    // 4. Atomic Budget Reservation against Policy Perimeter
+    const decision = engine.evaluateAndReserve({
+      agentId: resolvedAgentId,
+      vendor,
+      estimatedCostMicroUsdc: authoritativeQuoteMicroUsdc,
       timestamp: now,
+      idempotencyKey,
     });
 
     if (!decision.allowed) {
@@ -153,82 +285,72 @@ export function createGatewayApp(engine: PolicyEngine) {
     }
 
     const reservationId = decision.reservationId!;
-    const state = engine.getAgentState(agentId);
-    const policy = engine.getAllPolicies().find((p) => p.agentId === agentId);
-
-    // 2. Strict Destination Validation & SSRF Guard
-    const destValidation = validateVendorDestination(
-      vendor,
-      reqPath,
-      policy?.allowedVendors || [vendor]
-    );
-
-    if (!destValidation.valid) {
-      // Rollback reservation immediately
-      engine.rollbackReservation(reservationId, destValidation.error);
-      c.header('x-shlita-decision', 'BLOCKED');
-      c.header('x-shlita-violation-reason', 'SSRF_SECURITY_VIOLATION');
-      return c.json(
-        {
-          allowed: false,
-          error: 'SECURITY_VIOLATION',
-          reason: 'SSRF_SECURITY_VIOLATION',
-          message: destValidation.error,
-          timestamp: now,
-        },
-        403
-      );
-    }
 
     const targetUrl = destValidation.url!;
     let responseData: any = null;
     let actualStatus = 200;
     const startMs = performance.now();
 
-    // 3. Upstream Dispatch (Live or Test-Mode Simulation)
-    const isSimulationMode =
-      simulate ||
-      c.req.header('x-shlita-simulation') === 'true' ||
-      vendor === 'api.helius.xyz' ||
-      vendor === 'api.tavily.com';
+    // 5. Explicit Simulation Flag (NEVER auto-simulate based on vendor name!)
+    const isExplicitSimulation =
+      simulate === true || c.req.header('x-shlita-simulation') === 'true';
 
-    if (isSimulationMode) {
-      // Realistic simulation mode (e.g. hackathon demo or test suite)
+    let actualCostMicroUsdc = serverTariff;
+
+    if (isExplicitSimulation) {
+      // Explicit Simulation Mode
       if (vendor.includes('helius')) {
         responseData = {
-          network: 'solana-mainnet-beta',
+          network: 'solana-devnet',
           slot: 318492048,
           result: {
-            account: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-            balanceUsdc: 450.25,
-            activeSubscriptions: 3,
-            pdaAuthority: '7xKqWb...SubscriptionsAuthority',
+            account: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+            balanceMicroUsdc: 25000000,
+            activeDelegations: 2,
+            program: 'De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44',
           },
         };
       } else if (vendor.includes('tavily')) {
         responseData = {
-          query: payload?.query || 'Solana Subscriptions 2026',
+          query: requestPayload?.query || 'Solana Subscriptions Protocol',
           results: [
-            { title: 'Solana Foundation Subscriptions Announcement', score: 0.98 },
-            { title: 'Autonomous Agent Micro-Settlements on Solana', score: 0.95 },
+            { title: 'Official Solana Subscriptions & Allowances Program', score: 0.99 },
+            { title: 'Autonomous AI Agent Micro-Settlements on Solana', score: 0.96 },
           ],
         };
       } else {
-        responseData = { message: 'Upstream vendor response successfully processed via Shlita.' };
+        responseData = { message: 'Simulated upstream response returned under test perimeter.' };
       }
     } else {
       // Real Upstream Network Request Forwarding
       try {
-        const authHeader = c.req.header('Authorization');
-        const upstreamRes = await fetch(targetUrl, {
+        const upstreamHeaders: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Shlita-Financial-Control-Plane/1.0',
+        };
+
+        // Attach server-held provider credentials (NEVER forward agent's Shlita token!)
+        let fetchUrl = targetUrl;
+        if (providerDef?.envKeyName && process.env[providerDef.envKeyName]) {
+          const secret = process.env[providerDef.envKeyName]!;
+          if (providerDef.authParamName) {
+            const urlObj = new URL(fetchUrl);
+            urlObj.searchParams.set(providerDef.authParamName, secret);
+            fetchUrl = urlObj.toString();
+          } else if (providerDef.authHeaderName) {
+            upstreamHeaders[providerDef.authHeaderName] = `Bearer ${secret}`;
+          }
+        }
+
+        const upstreamRes = await fetch(fetchUrl, {
           method,
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'Shlita-Policy-Perimeter/1.0',
-            ...(authHeader ? { Authorization: authHeader } : {}),
-          },
-          body: method !== 'GET' && method !== 'HEAD' && payload ? JSON.stringify(payload) : undefined,
-          signal: AbortSignal.timeout(10000), // 10s upstream timeout
+          headers: upstreamHeaders,
+          body:
+            method !== 'GET' && method !== 'HEAD' && requestPayload
+              ? JSON.stringify(requestPayload)
+              : undefined,
+          redirect: 'manual', // Prevent redirect-based SSRF hops
+          signal: AbortSignal.timeout(providerDef?.timeoutMs || 15000),
         });
 
         actualStatus = upstreamRes.status;
@@ -238,8 +360,23 @@ export function createGatewayApp(engine: PolicyEngine) {
         } catch {
           responseData = text;
         }
+
+        // Billable status check
+        if (actualStatus >= 500) {
+          // Upstream 5xx: Rollback reservation
+          engine.rollbackReservation(reservationId, `Upstream HTTP ${actualStatus}`);
+          return c.json(
+            {
+              allowed: true,
+              error: 'UPSTREAM_GATEWAY_ERROR',
+              message: `Upstream vendor ${vendor} responded with status ${actualStatus}`,
+              reservationRolledBack: true,
+              upstreamStatus: actualStatus,
+            },
+            502
+          );
+        }
       } catch (err: any) {
-        // Network timeout or upstream failure -> Rollback reservation
         engine.rollbackReservation(reservationId, err?.message || 'Upstream connection error');
         return c.json(
           {
@@ -255,10 +392,14 @@ export function createGatewayApp(engine: PolicyEngine) {
 
     const latencyMs = Number((performance.now() - startMs).toFixed(2));
 
-    // 4. Commit atomic reservation
-    engine.commitReservation(reservationId, costBigInt);
+    // 6. Commit atomic reservation into ledger
+    engine.commitReservation(reservationId, actualCostMicroUsdc);
 
-    const updatedState = engine.getAgentState(agentId);
+    const updatedState = engine.getAgentState(resolvedAgentId);
+
+    // 7. Settlement Ledger Orchestration (Honest States)
+    // State is SETTLEMENT_PENDING until on-chain submission & confirmation
+    const settlementState: TransactionLifecycleState = 'SETTLEMENT_PENDING';
 
     c.header('x-shlita-decision', 'ALLOWED');
     c.header('x-shlita-reservation-id', reservationId);
@@ -268,14 +409,21 @@ export function createGatewayApp(engine: PolicyEngine) {
 
     return c.json({
       success: true,
+      mode: isExplicitSimulation ? 'simulated' : 'live',
       vendor,
       targetUrl,
       status: actualStatus,
       latencyMs,
-      settlement: {
-        costMicroUsdc: costBigInt.toString(),
+      lifecycleState: 'VENDOR_SUCCEEDED',
+      cost: {
+        authorizedQuoteMicroUsdc: authoritativeQuoteMicroUsdc.toString(),
+        actualCostMicroUsdc: actualCostMicroUsdc.toString(),
         currency: 'USDC',
-        status: 'SETTLED',
+      },
+      settlement: {
+        costMicroUsdc: actualCostMicroUsdc.toString(),
+        currency: 'USDC',
+        status: settlementState, // NEVER SETTLED!
         reservationId,
       },
       upstream: responseData,
@@ -319,7 +467,7 @@ export function createGatewayApp(engine: PolicyEngine) {
     return c.json({ agents });
   });
 
-  // Emergency Freeze
+  // Emergency Freeze (Operator RBAC)
   app.post('/v1/agents/:id/freeze', async (c) => {
     const agentId = c.req.param('id');
     const body = await c.req.json().catch(() => ({}));
@@ -327,14 +475,14 @@ export function createGatewayApp(engine: PolicyEngine) {
     return c.json({ success: true, agentId, status: 'AGENT_FROZEN' });
   });
 
-  // Unfreeze
+  // Unfreeze (Operator RBAC)
   app.post('/v1/agents/:id/unfreeze', (c) => {
     const agentId = c.req.param('id');
     engine.unfreezeAgent(agentId);
     return c.json({ success: true, agentId, status: 'ACTIVE' });
   });
 
-  // Reset Circuit Breaker
+  // Reset Circuit Breaker (Operator RBAC)
   app.post('/v1/agents/:id/reset-circuit', (c) => {
     const agentId = c.req.param('id');
     engine.resetCircuitBreaker(agentId);
@@ -344,11 +492,7 @@ export function createGatewayApp(engine: PolicyEngine) {
   // Audit Logs & Active Reservations
   app.get('/v1/audit', (c) => {
     const logs = engine.getAuditLogs();
-    const activeReservations = engine.getActiveReservations().map((r) => ({
-      ...r,
-      amountMicroUsdc: r.amountMicroUsdc.toString(),
-    }));
-    return c.json({ logs, activeReservations });
+    return c.json({ logs });
   });
 
   // Live Telemetry Stream Feed

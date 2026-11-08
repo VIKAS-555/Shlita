@@ -258,4 +258,72 @@ describe('Shlita Core Policy Engine (Public Seam)', () => {
       expect(engine.getAgentState('agent-researcher-01').activePendingReservationsMicroUsdc).toBe(0n);
     }
   });
+
+  it('handles idempotency keys and rejects duplicate spend upon client retries', () => {
+    const key = `idem_${Date.now()}_test`;
+    const req: OutboundRequest = {
+      agentId: 'agent-researcher-01',
+      vendor: 'api.helius.xyz',
+      estimatedCostMicroUsdc: 20_000n,
+      timestamp: Date.now(),
+      idempotencyKey: key,
+    };
+
+    const first = engine.evaluateAndReserve(req);
+    expect(first.allowed).toBe(true);
+    const resId = first.allowed ? first.reservationId! : '';
+
+    // Retrying with same idempotency key before commit returns existing reservation
+    const retryBeforeCommit = engine.evaluateAndReserve(req);
+    expect(retryBeforeCommit.allowed).toBe(true);
+    if (retryBeforeCommit.allowed) {
+      expect(retryBeforeCommit.reservationId).toBe(resId);
+    }
+
+    // Commit the reservation
+    const committed = engine.commitReservation(resId, 20_000n);
+    expect(committed).toBe(true);
+
+    // Retrying with same idempotency key after commit rejects duplicate charge
+    const retryAfterCommit = engine.evaluateAndReserve(req);
+    expect(retryAfterCommit.allowed).toBe(false);
+    if (!retryAfterCommit.allowed) {
+      expect(retryAfterCommit.reason).toBe('CONCURRENCY_RESERVATION_FAILED');
+    }
+  });
+
+  it('rejects commit when actual cost exceeds reserved budget cap', () => {
+    const req: OutboundRequest = {
+      agentId: 'agent-researcher-01',
+      vendor: 'api.helius.xyz',
+      estimatedCostMicroUsdc: 15_000n,
+      timestamp: Date.now(),
+    };
+
+    const dec = engine.evaluateAndReserve(req);
+    expect(dec.allowed).toBe(true);
+    if (dec.allowed && dec.reservationId) {
+      // Attempting to commit 25_000n against a 15_000n reservation must fail
+      const commitResult = engine.commitReservation(dec.reservationId, 25_000n);
+      expect(commitResult).toBe(false);
+    }
+  });
+
+  it('reclaims expired reservations automatically past TTL', () => {
+    const now = Date.now();
+    const req: OutboundRequest = {
+      agentId: 'agent-researcher-01',
+      vendor: 'api.helius.xyz',
+      estimatedCostMicroUsdc: 25_000n,
+      timestamp: now,
+    };
+
+    const dec = engine.evaluateAndReserve(req);
+    expect(dec.allowed).toBe(true);
+    expect(engine.getAgentState('agent-researcher-01').activePendingReservationsMicroUsdc).toBe(25_000n);
+
+    // Fast-forward 50 seconds past TTL (45s TTL)
+    engine.getLedger().pruneExpiredReservations(now + 50_000);
+    expect(engine.getAgentState('agent-researcher-01').activePendingReservationsMicroUsdc).toBe(0n);
+  });
 });

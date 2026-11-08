@@ -153,21 +153,22 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
           });
         }
       } else {
-        const sig = `5sol_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
         const resp = {
           status: 200,
           allowed: true,
+          mode: 'simulated',
+          lifecycleState: 'VENDOR_SUCCEEDED',
           vendor: sandboxVendor,
           settlement: {
             costMicroUsdc: Math.round(cost * 1_000_000).toString(),
             currency: 'USDC',
-            status: 'SETTLED',
-            txSignature: sig,
+            status: 'SETTLEMENT_PENDING',
+            note: 'Simulated sandbox authorization. Never marked SETTLED without independently confirmed Solana transaction.',
           },
           upstream: {
-            network: 'solana-mainnet-beta',
+            network: 'solana-devnet',
             slot: 318492048,
-            result: 'Query successfully dispatched and settled.',
+            result: 'Query successfully dispatched and validated under Shlita policy perimeter.',
           },
         };
         setSandboxResponse(resp);
@@ -181,7 +182,6 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
             vendor: sandboxVendor,
             amountUsdc: cost,
             latencyMs: 0.14,
-            signature: sig,
             details: resp,
           });
         }

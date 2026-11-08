@@ -211,15 +211,28 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
                 </button>
               </div>
               {selectedTransaction.status === 'CONFIRMED' && (
-                <a
-                  href={selectedTransaction.solanaExplorerUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-xs text-solana hover:underline font-mono"
-                >
-                  <span>View on Solana Explorer</span>
-                  <ExternalLink size={12} />
-                </a>
+                <div className="flex items-center justify-between text-xs font-mono pt-1">
+                  <span className="text-text-muted text-[10px]">
+                    {selectedTransaction.signature.length >= 64 && !selectedTransaction.signature.includes('...')
+                      ? 'Verified On-Chain Transaction'
+                      : 'Client Sandbox Demo Record'}
+                  </span>
+                  {selectedTransaction.signature.length >= 64 && !selectedTransaction.signature.includes('...') ? (
+                    <a
+                      href={selectedTransaction.solanaExplorerUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 text-solana hover:underline font-mono"
+                    >
+                      <span>View on Solana Explorer</span>
+                      <ExternalLink size={12} />
+                    </a>
+                  ) : (
+                    <span className="text-amber-500/90 text-[11px] font-sans">
+                      Sandbox Simulation (Explorer links active on live Devnet submission)
+                    </span>
+                  )}
+                </div>
               )}
             </div>
 
