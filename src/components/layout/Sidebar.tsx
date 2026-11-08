@@ -47,7 +47,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const workspaceItems = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
     { id: 'agents', label: 'AI Agents', icon: Bot, badge: '6' },
-    { id: 'policies', label: 'Spending Policies', icon: ShieldCheck },
+    { id: 'policies', label: 'Spending Policies', icon: ShieldCheck, badge: '3' },
     { id: 'providers', label: 'Providers & Vendors', icon: Boxes },
     { id: 'subscriptions', label: 'Subscriptions', icon: Repeat, badge: '4' },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
