@@ -126,6 +126,34 @@ export const App: React.FC = () => {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
+  // Live Gateway Daemon Connection State
+  const [isBackendConnected, setIsBackendConnected] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const checkBackend = async () => {
+      try {
+        const res = await fetch('http://localhost:4000/health', {
+          method: 'GET',
+          signal: AbortSignal.timeout(2000),
+        });
+        if (res.ok && active) {
+          setIsBackendConnected(true);
+        } else if (active) {
+          setIsBackendConnected(false);
+        }
+      } catch {
+        if (active) setIsBackendConnected(false);
+      }
+    };
+    checkBackend();
+    const interval = setInterval(checkBackend, 15000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+
   // Core Data States
   const [agents, setAgents] = useState<Agent[]>(INITIAL_AGENTS);
   const [policies, setPolicies] = useState<SpendingPolicy[]>(INITIAL_POLICIES);
@@ -703,6 +731,7 @@ export const App: React.FC = () => {
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
           onOpenSimulator={() => setIsSimulatorOpen(true)}
           onOpenTour={() => setIsTourOpen(true)}
+          isBackendConnected={isBackendConnected}
         />
 
         {/* Screen Routing */}

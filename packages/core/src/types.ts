@@ -26,10 +26,20 @@ export type PolicyViolationReason =
   | 'CIRCUIT_BREAKER_TRIPPED'
   | 'RATE_ANOMALY_LOOP_DETECTED'
   | 'AGENT_FROZEN'
-  | 'AGENT_NOT_FOUND';
+  | 'AGENT_NOT_FOUND'
+  | 'CONCURRENCY_RESERVATION_FAILED'
+  | 'SSRF_SECURITY_VIOLATION';
+
+export interface BudgetReservation {
+  reservationId: string;
+  agentId: string;
+  amountMicroUsdc: bigint;
+  createdAt: number;
+  expiresAt: number;
+}
 
 export type PolicyDecision =
-  | { allowed: true; authorizedAmountMicroUsdc: bigint }
+  | { allowed: true; authorizedAmountMicroUsdc: bigint; reservationId?: string }
   | { allowed: false; reason: PolicyViolationReason; message: string };
 
 export type ExecutionOutcome =
@@ -43,6 +53,7 @@ export interface AgentFinancialState {
   status: AgentStatus;
   currentPeriodSpendMicroUsdc: bigint;
   totalLifetimeSpendMicroUsdc: bigint;
+  activePendingReservationsMicroUsdc: bigint;
   periodStartTimestamp: number;
   consecutiveErrors: number;
   recentCallTimestamps: number[];
@@ -58,4 +69,5 @@ export interface AuditLogEntry {
   actualCostMicroUsdc?: string;
   decision: 'ALLOWED' | 'BLOCKED';
   reason?: PolicyViolationReason;
+  reservationId?: string;
 }

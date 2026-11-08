@@ -24,6 +24,7 @@ interface TopNavProps {
   onOpenCommandPalette: () => void;
   onOpenSimulator: () => void;
   onOpenTour?: () => void;
+  isBackendConnected?: boolean;
 }
 
 export const TopNav: React.FC<TopNavProps> = ({
@@ -36,6 +37,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenCommandPalette,
   onOpenSimulator,
   onOpenTour,
+  isBackendConnected = false,
 }) => {
   const [walletConnected, setWalletConnected] = useState(true);
   const [isMuted, setIsMuted] = useState(() => sounds.getMuted());
@@ -102,6 +104,34 @@ export const TopNav: React.FC<TopNavProps> = ({
             <span className="hidden sm:inline">60s Tour</span>
           </button>
         )}
+
+        {/* Gateway API Status Pill */}
+        <div
+          className={`hidden xl:flex items-center space-x-2 border px-3 py-1.5 rounded-full text-xs font-mono transition ${
+            isBackendConnected
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+              : 'bg-card-elevated/60 border-border text-text-muted'
+          }`}
+          title={
+            isBackendConnected
+              ? 'Live Gateway Connected: Reverse Proxy active on localhost:4000'
+              : 'Client Sandbox Mode: Operating in Web3 browser sandbox (Deploy daemon with npm start)'
+          }
+        >
+          <span className="relative flex h-2 w-2">
+            {isBackendConnected && (
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            )}
+            <span
+              className={`relative inline-flex rounded-full h-2 w-2 ${
+                isBackendConnected ? 'bg-emerald-400' : 'bg-amber-400'
+              }`}
+            ></span>
+          </span>
+          <span className="text-[11px] font-bold">
+            {isBackendConnected ? 'Gateway Live (:4000)' : 'Client Sandbox'}
+          </span>
+        </div>
 
         {/* Network & Policy Status Pill */}
         <div

@@ -83,4 +83,47 @@ describe('Shlita Gateway HTTP Seam', () => {
     const data = await proxyRes.json();
     expect(data.reason).toBe('AGENT_FROZEN');
   });
+
+  it('strictly blocks SSRF attempts targeting localhost or private IPs', async () => {
+    // Attempt SSRF targeting loopback
+    const loopbackRes = await app.request('/v1/proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: 'agent-sentinel-01',
+        vendor: 'http://127.0.0.1:8080',
+        estimatedCostMicroUsdc: '5000',
+        path: '/admin/keys',
+      }),
+    });
+    expect(loopbackRes.status).toBe(403);
+    const data = await loopbackRes.json();
+    expect(data.reason).toBe('UNAPPROVED_VENDOR');
+
+    // Attempt AWS metadata IP
+    const metadataRes = await app.request('/v1/proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: 'agent-sentinel-01',
+        vendor: 'http://169.254.169.254',
+        estimatedCostMicroUsdc: '5000',
+        path: '/latest/meta-data',
+      }),
+    });
+    expect(metadataRes.status).toBe(403);
+  });
+
+  it('serves gateway health status and live telemetry stream', async () => {
+    const healthRes = await app.request('/health');
+    expect(healthRes.status).toBe(200);
+    const health = await healthRes.json();
+    expect(health.status).toBe('ok');
+    expect(health.registeredAgents).toBe(1);
+
+    const telemRes = await app.request('/v1/telemetry');
+    expect(telemRes.status).toBe(200);
+    const telem = await telemRes.json();
+    expect(Array.isArray(telem.events)).toBe(true);
+  });
 });

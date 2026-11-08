@@ -177,4 +177,85 @@ describe('Shlita Core Policy Engine (Public Seam)', () => {
     decision = engine.evaluate(req);
     expect(decision.allowed).toBe(true);
   });
+
+  it('prevents concurrent double-spending race conditions via atomic reservations', () => {
+    // Budget is 200_000n. We spend 160_000n so remaining is 40_000n.
+    const setupReq: OutboundRequest = {
+      agentId: 'agent-researcher-01',
+      vendor: 'api.helius.xyz',
+      estimatedCostMicroUsdc: 40_000n,
+      timestamp: Date.now(),
+    };
+    for (let i = 0; i < 4; i++) {
+      const d = engine.evaluateAndReserve(setupReq);
+      expect(d.allowed).toBe(true);
+      if (d.allowed && d.reservationId) {
+        engine.commitReservation(d.reservationId, 40_000n);
+      }
+    }
+
+    // Now remaining budget is exactly 40_000n.
+    // Two concurrent requests A and B both attempt to spend 35_000n.
+    const concurrentReqA: OutboundRequest = {
+      agentId: 'agent-researcher-01',
+      vendor: 'api.helius.xyz',
+      estimatedCostMicroUsdc: 35_000n,
+      timestamp: Date.now(),
+    };
+    const concurrentReqB: OutboundRequest = {
+      agentId: 'agent-researcher-01',
+      vendor: 'api.helius.xyz',
+      estimatedCostMicroUsdc: 35_000n,
+      timestamp: Date.now(),
+    };
+
+    const decisionA = engine.evaluateAndReserve(concurrentReqA);
+    expect(decisionA.allowed).toBe(true);
+    expect(decisionA.allowed && decisionA.reservationId).toBeDefined();
+
+    // Inflight Request A holds 35_000n, so remaining available is only 5_000n!
+    // Request B must be rejected immediately to prevent overdraft:
+    const decisionB = engine.evaluateAndReserve(concurrentReqB);
+    expect(decisionB.allowed).toBe(false);
+    if (!decisionB.allowed) {
+      expect(decisionB.reason).toBe('PERIOD_BUDGET_EXCEEDED');
+    }
+
+    // Commit A
+    if (decisionA.allowed && decisionA.reservationId) {
+      engine.commitReservation(decisionA.reservationId);
+    }
+
+    // A small request for 5_000n can still succeed
+    const smallReq: OutboundRequest = {
+      agentId: 'agent-researcher-01',
+      vendor: 'api.helius.xyz',
+      estimatedCostMicroUsdc: 5_000n,
+      timestamp: Date.now(),
+    };
+    const decisionSmall = engine.evaluateAndReserve(smallReq);
+    expect(decisionSmall.allowed).toBe(true);
+  });
+
+  it('restores budget immediately when reservation is rolled back', () => {
+    const req: OutboundRequest = {
+      agentId: 'agent-researcher-01',
+      vendor: 'api.helius.xyz',
+      estimatedCostMicroUsdc: 50_000n,
+      timestamp: Date.now(),
+    };
+
+    const dec = engine.evaluateAndReserve(req);
+    expect(dec.allowed).toBe(true);
+    if (dec.allowed && dec.reservationId) {
+      const resId = dec.reservationId;
+      // Active reservation should be 50_000n
+      expect(engine.getAgentState('agent-researcher-01').activePendingReservationsMicroUsdc).toBe(50_000n);
+
+      // Rollback due to upstream timeout
+      const rolledBack = engine.rollbackReservation(resId, 'Upstream timeout');
+      expect(rolledBack).toBe(true);
+      expect(engine.getAgentState('agent-researcher-01').activePendingReservationsMicroUsdc).toBe(0n);
+    }
+  });
 });

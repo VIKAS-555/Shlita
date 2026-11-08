@@ -29,12 +29,13 @@ Giving an autonomous AI agent raw wallet private keys or unlimited credit cards 
 
 **Shlita** (Hebrew for *"Governance & Control"*) is an inline financial policy proxy and operator control plane that enforces deterministic boundaries on AI agent spending before on-chain settlement on Solana:
 
-- 🛡️ **Sub-Millisecond Policy Checks**: Intercepts requests and enforces per-call spending caps (e.g. \$0.05 max per call).
+- 🛡️ **Sub-Millisecond Policy Checks**: Intercepts requests and enforces per-call spending caps (e.g. $0.05 max per call).
+- 🔒 **Atomic Budget Reservations**: Concurrency-safe two-phase commit reservation protocol (`evaluateAndReserve` ➔ `commitReservation` / `rollbackReservation`) preventing race condition overspending under high concurrency.
 - 🔄 **Periodic Budget Rollovers**: Hard periodic limits (daily/monthly caps in USDC base units) with automatic period rollovers.
-- 🌐 **Vendor Whitelisting**: Restricts agents to verified domains (`api.helius.xyz`, `api.tavily.com`) and blocks unauthorized destinations.
+- 🌐 **Vendor Whitelisting & SSRF Firewall**: Restricts agents to verified domains (`api.helius.xyz`, `api.tavily.com`) and strictly blocks SSRF attacks (loopback, RFC 1918 private subnets, cloud metadata services).
 - ⚡ **Rolling Anomaly Circuit Breaker**: Detects high-frequency call bursts (>6 calls/min) or error cascades and automatically freezes the agent.
-- ⛓️ **Native Solana Settlement**: Settles via Solana's official `@solana/subscriptions` architecture without SPL Token single-delegate collisions.
-- 🎨 **Enterprise Command Center**: Beautiful dark/light theme dashboard with real-time budget utilization rings, telemetry, and 1-click circuit reset.
+- ⛓️ **Real Solana USDC SPL Settlement**: Settles micro-transfers via `@solana/spl-token` (`createTransferCheckedInstruction` with 6-decimal micro-USDC precision) and Solana Subscriptions Authority PDAs without single-delegate collisions.
+- 🎨 **Enterprise Command Center**: Beautiful dark/light theme dashboard with real-time budget utilization rings, live gateway daemon status indicator (`Gateway Live (:4000)`), telemetry, and 1-click circuit reset.
 
 ---
 
@@ -80,7 +81,7 @@ shlita/
 ├── src/                       # React 18 + Vite + Tailwind v4 + Recharts UI Dashboard
 ├── demo/
 │   └── run-demo.ts            # Terminal attack & circuit breaker simulation
-├── tests/                     # 11 Unit & Integration Tests (Vitest)
+├── tests/                     # 17 Unit & Integration Tests (Vitest)
 ├── GLOSSARY.md                # Ubiquitous domain language
 └── docs/adr/                  # Architectural Decision Records (ADR 0001)
 ```
@@ -104,7 +105,7 @@ npm install
 ```bash
 npm test
 ```
-All 11 unit and integration tests will execute against core invariants, gateway proxies, and Solana settlement seams.
+All 17 unit and integration tests will execute against core invariants, atomic budget reservations, gateway SSRF proxies, and Solana USDC settlement seams.
 
 ### Run Attack Simulation
 ```bash

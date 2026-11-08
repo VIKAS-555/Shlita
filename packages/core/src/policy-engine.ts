@@ -1,6 +1,7 @@
 import {
   AgentFinancialState,
   AuditLogEntry,
+  BudgetReservation,
   ExecutionOutcome,
   OutboundRequest,
   PolicyDecision,
@@ -10,6 +11,7 @@ import {
 export class PolicyEngine {
   private policies = new Map<string, SpendingPolicy>();
   private states = new Map<string, AgentFinancialState>();
+  private reservations = new Map<string, BudgetReservation>();
   private auditLogs: AuditLogEntry[] = [];
 
   registerAgent(policy: SpendingPolicy): void {
@@ -20,6 +22,7 @@ export class PolicyEngine {
         status: 'ACTIVE',
         currentPeriodSpendMicroUsdc: 0n,
         totalLifetimeSpendMicroUsdc: 0n,
+        activePendingReservationsMicroUsdc: 0n,
         periodStartTimestamp: Date.now(),
         consecutiveErrors: 0,
         recentCallTimestamps: [],
@@ -27,7 +30,48 @@ export class PolicyEngine {
     }
   }
 
-  evaluate(request: OutboundRequest): PolicyDecision {
+  /**
+   * Normalizes vendor hostname, rejecting SSRF patterns and stripping protocols/ports.
+   */
+  public normalizeVendorHost(vendorStr: string): string {
+    const clean = vendorStr.trim().toLowerCase();
+    // If it contains a protocol, extract hostname
+    if (clean.startsWith('http://') || clean.startsWith('https://')) {
+      try {
+        return new URL(clean).hostname;
+      } catch {
+        return clean.replace(/^https?:\/\//, '').split('/')[0].split(':')[0];
+      }
+    }
+    return clean.split('/')[0].split(':')[0];
+  }
+
+  /**
+   * Prunes any reservations that have passed their TTL, releasing held funds.
+   */
+  private pruneExpiredReservations(): void {
+    const now = Date.now();
+    for (const [id, r] of this.reservations.entries()) {
+      if (now > r.expiresAt) {
+        const state = this.states.get(r.agentId);
+        if (state) {
+          state.activePendingReservationsMicroUsdc =
+            state.activePendingReservationsMicroUsdc >= r.amountMicroUsdc
+              ? state.activePendingReservationsMicroUsdc - r.amountMicroUsdc
+              : 0n;
+        }
+        this.reservations.delete(id);
+      }
+    }
+  }
+
+  /**
+   * Atomic evaluation and budget reservation to prevent concurrent double-spending race conditions.
+   * Immediately places an in-memory hold on the requested funds.
+   */
+  evaluateAndReserve(request: OutboundRequest, ttlMs: number = 30_000): PolicyDecision {
+    this.pruneExpiredReservations();
+
     const policy = this.policies.get(request.agentId);
     if (!policy) {
       return {
@@ -59,16 +103,19 @@ export class PolicyEngine {
       };
     }
 
-    // 3. Vendor whitelist enforcement
-    const isVendorAllowed = policy.allowedVendors.some(
-      (v) => v === request.vendor || request.vendor.endsWith(`.${v}`)
-    );
+    // 3. Vendor whitelist enforcement with normalized host parsing
+    const normVendor = this.normalizeVendorHost(request.vendor);
+    const isVendorAllowed = policy.allowedVendors.some((v) => {
+      const normAllowed = this.normalizeVendorHost(v);
+      return normVendor === normAllowed || normVendor.endsWith(`.${normAllowed}`);
+    });
+
     if (!isVendorAllowed) {
       this.logAudit(request, 'BLOCKED', 'UNAPPROVED_VENDOR');
       return {
         allowed: false,
         reason: 'UNAPPROVED_VENDOR',
-        message: `Vendor ${request.vendor} is not in agent whitelist [${policy.allowedVendors.join(', ')}].`,
+        message: `Vendor '${request.vendor}' (${normVendor}) is not in agent whitelist [${policy.allowedVendors.join(', ')}].`,
       };
     }
 
@@ -101,31 +148,134 @@ export class PolicyEngine {
     if (request.timestamp >= state.periodStartTimestamp + periodDurationMs) {
       state.periodStartTimestamp = request.timestamp;
       state.currentPeriodSpendMicroUsdc = 0n;
+      // Do not clear activePendingReservationsMicroUsdc as ongoing inflight calls are still reserved
     }
 
-    // 7. Cumulative period budget enforcement
-    const projectedSpend = state.currentPeriodSpendMicroUsdc + request.estimatedCostMicroUsdc;
+    // 7. Cumulative period budget enforcement (INCLUDING ACTIVE RESERVATIONS)
+    const totalCommittedAndReserved =
+      state.currentPeriodSpendMicroUsdc + state.activePendingReservationsMicroUsdc;
+    const projectedSpend = totalCommittedAndReserved + request.estimatedCostMicroUsdc;
+
     if (projectedSpend > policy.periodBudgetMicroUsdc) {
       this.logAudit(request, 'BLOCKED', 'PERIOD_BUDGET_EXCEEDED');
       return {
         allowed: false,
         reason: 'PERIOD_BUDGET_EXCEEDED',
-        message: `Projected period spend (${projectedSpend} µUSDC) exceeds budget (${policy.periodBudgetMicroUsdc} µUSDC).`,
+        message: `Projected spend with active reservations (${projectedSpend} µUSDC) exceeds period budget (${policy.periodBudgetMicroUsdc} µUSDC). Available: ${
+          policy.periodBudgetMicroUsdc > totalCommittedAndReserved
+            ? policy.periodBudgetMicroUsdc - totalCommittedAndReserved
+            : 0n
+        } µUSDC.`,
       };
     }
 
-    // Allowed!
-    this.logAudit(request, 'ALLOWED');
+    // 8. Place Atomic Budget Reservation
+    const reservationId = `res_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const reservation: BudgetReservation = {
+      reservationId,
+      agentId: request.agentId,
+      amountMicroUsdc: request.estimatedCostMicroUsdc,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + ttlMs,
+    };
+
+    state.activePendingReservationsMicroUsdc += request.estimatedCostMicroUsdc;
+    this.reservations.set(reservationId, reservation);
+
+    this.logAudit(request, 'ALLOWED', undefined, reservationId);
     return {
       allowed: true,
       authorizedAmountMicroUsdc: request.estimatedCostMicroUsdc,
+      reservationId,
     };
   }
 
+  /**
+   * Commits an active reservation after successful upstream response.
+   * Converts the reserved hold into actual committed spend.
+   */
+  commitReservation(reservationId: string, actualCostMicroUsdc?: bigint): boolean {
+    const reservation = this.reservations.get(reservationId);
+    if (!reservation) return false;
+
+    const state = this.states.get(reservation.agentId);
+    if (!state) return false;
+
+    const costToCommit = actualCostMicroUsdc ?? reservation.amountMicroUsdc;
+
+    // Release reservation hold
+    state.activePendingReservationsMicroUsdc =
+      state.activePendingReservationsMicroUsdc >= reservation.amountMicroUsdc
+        ? state.activePendingReservationsMicroUsdc - reservation.amountMicroUsdc
+        : 0n;
+
+    // Apply actual spend
+    state.currentPeriodSpendMicroUsdc += costToCommit;
+    state.totalLifetimeSpendMicroUsdc += costToCommit;
+    state.consecutiveErrors = 0;
+    state.recentCallTimestamps.push(Date.now());
+
+    this.reservations.delete(reservationId);
+    return true;
+  }
+
+  /**
+   * Rolls back a reservation when an upstream request fails or network aborts.
+   * Instantly unlocks the reserved budget for subsequent requests.
+   */
+  rollbackReservation(reservationId: string, error?: string): boolean {
+    const reservation = this.reservations.get(reservationId);
+    if (!reservation) return false;
+
+    const state = this.states.get(reservation.agentId);
+    const policy = this.policies.get(reservation.agentId);
+
+    if (state) {
+      state.activePendingReservationsMicroUsdc =
+        state.activePendingReservationsMicroUsdc >= reservation.amountMicroUsdc
+          ? state.activePendingReservationsMicroUsdc - reservation.amountMicroUsdc
+          : 0n;
+
+      if (error) {
+        state.consecutiveErrors += 1;
+        if (policy && state.consecutiveErrors >= policy.circuitBreaker.maxConsecutiveErrors) {
+          state.status = 'CIRCUIT_TRIPPED';
+          state.freezeReason = `Consecutive error threshold reached (${state.consecutiveErrors}/${policy.circuitBreaker.maxConsecutiveErrors}). Last error: ${error}`;
+        }
+      }
+    }
+
+    this.reservations.delete(reservationId);
+    return true;
+  }
+
+  /**
+   * Traditional synchronous evaluate for backward compatibility.
+   */
+  evaluate(request: OutboundRequest): PolicyDecision {
+    return this.evaluateAndReserve(request);
+  }
+
+  /**
+   * Traditional recordExecution for backward compatibility.
+   * Automatically clears any matching active reservation for the agent.
+   */
   recordExecution(request: OutboundRequest, outcome: ExecutionOutcome): void {
     const policy = this.policies.get(request.agentId);
     const state = this.states.get(request.agentId);
     if (!policy || !state) return;
+
+    // Release matching pending reservation to avoid double counting in legacy calls
+    for (const [resId, r] of this.reservations.entries()) {
+      if (r.agentId === request.agentId && r.amountMicroUsdc === request.estimatedCostMicroUsdc) {
+        state.activePendingReservationsMicroUsdc =
+          state.activePendingReservationsMicroUsdc >= r.amountMicroUsdc
+            ? state.activePendingReservationsMicroUsdc - r.amountMicroUsdc
+            : 0n;
+        this.reservations.delete(resId);
+        break;
+      }
+    }
 
     if (outcome.success) {
       state.currentPeriodSpendMicroUsdc += outcome.actualCostMicroUsdc;
@@ -158,10 +308,19 @@ export class PolicyEngine {
     }
   }
 
+  resetCircuitBreaker(agentId: string): void {
+    const state = this.states.get(agentId);
+    if (state) {
+      state.status = 'ACTIVE';
+      state.consecutiveErrors = 0;
+      state.freezeReason = undefined;
+    }
+  }
+
   getAgentState(agentId: string): AgentFinancialState {
     const state = this.states.get(agentId);
     if (!state) {
-      throw new Error(`Agent ${agentId} not registered.`);
+      throw new Error(`Agent ${agentId} not registered`);
     }
     return { ...state };
   }
@@ -174,23 +333,30 @@ export class PolicyEngine {
     return Array.from(this.states.values());
   }
 
-  getAuditLogs(limit = 100): AuditLogEntry[] {
-    return this.auditLogs.slice(-limit).reverse();
+  getAuditLogs(): AuditLogEntry[] {
+    return [...this.auditLogs];
+  }
+
+  getActiveReservations(): BudgetReservation[] {
+    this.pruneExpiredReservations();
+    return Array.from(this.reservations.values());
   }
 
   private logAudit(
     request: OutboundRequest,
     decision: 'ALLOWED' | 'BLOCKED',
-    reason?: any
+    reason?: any,
+    reservationId?: string
   ): void {
-    this.auditLogs.push({
-      id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      timestamp: request.timestamp,
+    this.auditLogs.unshift({
+      id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      timestamp: Date.now(),
       agentId: request.agentId,
       vendor: request.vendor,
       estimatedCostMicroUsdc: request.estimatedCostMicroUsdc.toString(),
       decision,
       reason,
+      reservationId,
     });
   }
 }
