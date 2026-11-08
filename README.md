@@ -8,8 +8,9 @@
 [![GitHub Repo](https://img.shields.io/badge/GitHub-XiaoArnav%2FShlita-7C3AED?logo=github)](https://github.com/XiaoArnav/Shlita)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-- ⚡ **Primary High-Speed Live App (Vercel)**: [https://shlita.vercel.app/](https://shlita.vercel.app/)
-- 🌐 **GitHub Pages Mirror**: [https://xiaoarnav.github.io/Shlita/](https://xiaoarnav.github.io/Shlita/)
+- ⚡ **Primary Live Application (Vercel Edge)**: [https://shlita.vercel.app/](https://shlita.vercel.app/)
+- 🌐 **Backup Live Mirror (GitHub Pages)**: [https://xiaoarnav.github.io/Shlita/](https://xiaoarnav.github.io/Shlita/)
+- 📖 **DEV.to Deep Dive Writeup**: [Why We Built a Financial Firewall for Autonomous AI Agents on Solana](https://dev.to/polymath_arnav/why-we-built-a-financial-firewall-for-autonomous-ai-agents-on-solana-acid-reservations-zero-key-4mfe)
 
 ---
 
