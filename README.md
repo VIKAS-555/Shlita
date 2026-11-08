@@ -2,14 +2,18 @@
 
 > **Autonomous AI Agent Financial Control Plane & Policy Proxy on Solana Rails.**
 
+![Shlita - Financial Firewall for Autonomous AI Agents on Solana](assets/thumbnail.jpg)
+
 [![Vercel](https://img.shields.io/badge/Vercel-shlita.vercel.app-000000?style=flat-square&logo=vercel&logoColor=white)](https://shlita.vercel.app/)
 [![GitHub Pages](https://img.shields.io/badge/Mirror-xiaoarnav.github.io%2FShlita-14F195?style=flat-square&logo=googlechrome&logoColor=white)](https://xiaoarnav.github.io/Shlita/)
+[![YouTube Demo](https://img.shields.io/badge/YouTube-Video%20Demo-FF0000?style=flat-square&logo=youtube&logoColor=white)](https://youtu.be/o5vHfcUjDJE)
 [![Solana Subscriptions](https://img.shields.io/badge/Solana-Subscriptions%20PDA-7C3AED?style=flat-square&logo=solana)](https://solana.com)
 [![Tests](https://img.shields.io/badge/Tests-25%20Passing-success?style=flat-square)](tests)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
 - ⚡ **Primary Live Application (Vercel Edge)**: [https://shlita.vercel.app/](https://shlita.vercel.app/)
 - 🌐 **Backup Live Mirror (GitHub Pages)**: [https://xiaoarnav.github.io/Shlita/](https://xiaoarnav.github.io/Shlita/)
+- 📺 **Full Video Walkthrough**: [Watch on YouTube (https://youtu.be/o5vHfcUjDJE)](https://youtu.be/o5vHfcUjDJE)
 - 📖 **DEV.to Deep Dive Writeup**: [Why We Built a Financial Firewall for Autonomous AI Agents on Solana](https://dev.to/polymath_arnav/why-we-built-a-financial-firewall-for-autonomous-ai-agents-on-solana-acid-reservations-zero-key-4mfe)
 
 ---
