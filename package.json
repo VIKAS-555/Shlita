@@ -1,7 +1,7 @@
 {
-  "name": "autostream",
+  "name": "shlita",
   "version": "0.1.0",
-  "description": "AutoStream — Financial & Spending Control Plane for Autonomous AI Agents on Solana",
+  "description": "Shlita (שְׁלִיטָה) — Financial Control Plane & Spending Policy Proxy for Autonomous AI Agents on Solana",
   "private": true,
   "type": "module",
   "scripts": {

@@ -64,7 +64,7 @@ export const AnalyticsScreen: React.FC<AnalyticsScreenProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `autostream-analytics-${Date.now()}.csv`);
+    link.setAttribute('download', `shlita-analytics-${Date.now()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

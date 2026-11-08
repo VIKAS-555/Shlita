@@ -87,8 +87,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
           {!collapsed && (
             <div className="truncate">
-              <span className="font-bold text-sm tracking-tight text-text-primary block">AutoStream</span>
-              <span className="text-[10px] text-accent-violet font-mono tracking-wider block uppercase">Agent Banking</span>
+              <span className="font-bold text-sm tracking-tight text-text-primary block">Shlita</span>
+              <span className="text-[10px] text-accent-violet font-mono tracking-wider block uppercase">Control Plane</span>
             </div>
           )}
         </div>

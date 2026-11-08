@@ -263,7 +263,7 @@ export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
             <div className="bg-card-elevated p-3 rounded-xl border border-border space-y-1 text-xs font-mono">
               <span className="text-text-muted text-[10px] block">WEBHOOK EVENT</span>
               <div className="text-emerald-600 dark:text-emerald-400">event: "transaction.{selectedTransaction.status.toLowerCase()}"</div>
-              <div className="text-text-muted text-[11px]">Dispatched to https://api.trion.org/webhooks/autostream</div>
+              <div className="text-text-muted text-[11px]">Dispatched to https://api.trion.org/webhooks/shlita</div>
             </div>
           </div>
         </div>

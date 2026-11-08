@@ -29,7 +29,7 @@ export const App: React.FC = () => {
 
   // Black & White Theme Switcher (Dark / Light)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    const saved = localStorage.getItem('autostream_theme');
+    const saved = localStorage.getItem('shlita_theme');
     return (saved === 'light' || saved === 'dark') ? saved : 'dark';
   });
 
@@ -39,7 +39,7 @@ export const App: React.FC = () => {
     } else {
       document.documentElement.classList.remove('dark');
     }
-    localStorage.setItem('autostream_theme', theme);
+    localStorage.setItem('shlita_theme', theme);
   }, [theme]);
 
   const toggleTheme = () => {

@@ -181,7 +181,7 @@ export function createGatewayApp(engine: PolicyEngine) {
     if (fs.existsSync(indexPath)) {
       return c.html(fs.readFileSync(indexPath, 'utf-8'));
     }
-    return c.text('AutoStream UI is building. Please run `npm run build:ui` first.', 503);
+    return c.text('Shlita UI is building. Please run `npm run build:ui` first.', 503);
   });
 
   return app;

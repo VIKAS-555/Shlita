@@ -22,10 +22,10 @@ export const DeveloperScreen: React.FC = () => {
   const [sandboxResponse, setSandboxResponse] = useState<any>(null);
   const [isRunningSandbox, setIsRunningSandbox] = useState(false);
 
-  const apiKey = 'ast_live_79f939b4e18ac89a42ff9041280bce42';
+  const apiKey = 'shlt_live_79f939b4e18ac89a42ff9041280bce42';
 
   const snippets = {
-    curl: `curl -X POST https://api.autostream.finance/v1/proxy \\
+    curl: `curl -X POST https://api.shlita.finance/v1/proxy \\
   -H "Authorization: Bearer ${apiKey}" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -34,14 +34,14 @@ export const DeveloperScreen: React.FC = () => {
     "estimatedCostMicroUsdc": "20000",
     "path": "/v0/addresses/USDC/balances"
   }'`,
-    nodejs: `import { AutoStreamClient } from '@autostream/sdk';
+    nodejs: `import { ShlitaClient } from '@shlita/sdk';
 
-const client = new AutoStreamClient({
-  apiKey: process.env.AUTOSTREAM_API_KEY,
+const client = new ShlitaClient({
+  apiKey: process.env.SHLITA_API_KEY,
   network: 'mainnet-beta',
 });
 
-// Outbound paid API call via AutoStream policy perimeter
+// Outbound paid API call via Shlita policy perimeter
 const response = await client.proxy({
   agentId: 'agent-researcher-01',
   vendor: 'api.helius.xyz',
@@ -52,10 +52,10 @@ const response = await client.proxy({
 });
 
 console.log('Approved & Settled:', response.data);`,
-    python: `from autostream import AutoStreamClient
+    python: `from shlita import ShlitaClient
 
-client = AutoStreamClient(
-    api_key="ast_live_...",
+client = ShlitaClient(
+    api_key="shlt_live_...",
     network="mainnet-beta"
 )
 
@@ -70,7 +70,7 @@ res = client.proxy(
 
 print(f"Settled: {res.is_allowed}, Spend: {res.current_spend_usdc}")`,
     solana: `import { PublicKey, Transaction } from '@solana/web3.js';
-import { deriveSubscriptionAuthorityPda } from '@autostream/solana';
+import { deriveSubscriptionAuthorityPda } from '@shlita/solana';
 
 // Derive deterministic Subscriptions Authority PDA
 const [authorityPda, bump] = deriveSubscriptionAuthorityPda(
@@ -144,7 +144,7 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
         <div>
           <h2 className="text-xl font-bold text-text-primary tracking-tight">Developer Center & API SDK</h2>
           <p className="text-xs text-text-muted mt-1">
-            Integrate the AutoStream financial gateway into your autonomous agent workflows and MCP servers.
+            Integrate the Shlita financial gateway into your autonomous agent workflows and MCP servers.
           </p>
         </div>
         <div className="flex items-center space-x-2 text-xs font-mono bg-card border border-border px-3 py-1.5 rounded-xl shadow-sm">

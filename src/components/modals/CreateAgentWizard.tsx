@@ -64,14 +64,14 @@ export const CreateAgentWizard: React.FC<CreateAgentWizardProps> = ({
         const newAgent: Agent = {
           id: `agent-${Date.now()}`,
           name: name || 'autonomous-agent-new',
-          description: description || 'Autonomous workflow runner configured via AutoStream',
+          description: description || 'Autonomous workflow runner configured via Shlita',
           avatar: '🤖',
           environment,
           version: '1.0.0',
           mode,
-          connection: 'AutoStream Gateway Proxy',
+          connection: 'Shlita Gateway Proxy',
           status: 'ACTIVE',
-          walletAddress: `AuSt${Math.random().toString(36).substring(2, 6).toUpperCase()}...88Xp`,
+          walletAddress: `Shlt${Math.random().toString(36).substring(2, 6).toUpperCase()}...88Xp`,
           dailyBudgetUsdc: Number(dailyBudget) || 100,
           monthlyBudgetUsdc: Number(monthlyBudget) || 1000,
           spentThisMonthUsdc: 0.0,
@@ -291,7 +291,7 @@ export const CreateAgentWizard: React.FC<CreateAgentWizardProps> = ({
               <div className="p-3 bg-accent-violet/10 border border-accent-violet/25 rounded-xl text-xs text-text-secondary space-y-1">
                 <span className="font-bold text-accent-violet block">Self-Custodial Guarantee:</span>
                 <p className="text-[11px] leading-relaxed">
-                  AutoStream does not hold your keys. Signing will create a Program Derived Address (PDA) with
+                  Shlita does not hold your keys. Signing will create a Program Derived Address (PDA) with
                   bounded spending rights according to the official Solana Subscriptions program.
                 </p>
               </div>

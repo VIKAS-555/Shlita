@@ -49,7 +49,7 @@ export const TopNav: React.FC<TopNavProps> = ({
     <header className="h-16 border-b border-border bg-card/80 backdrop-blur-md sticky top-0 z-30 flex items-center justify-between px-6 transition-colors">
       {/* Breadcrumbs */}
       <div className="flex items-center space-x-2 text-xs">
-        <span className="text-text-muted">AutoStream</span>
+        <span className="text-text-muted">Shlita</span>
         <span className="text-text-faint">/</span>
         <span className="text-text-muted">TRioN Labs</span>
         <span className="text-text-faint">/</span>
