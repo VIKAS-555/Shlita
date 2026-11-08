@@ -1,4 +1,5 @@
 import React from 'react';
+import { ShlitaLogo } from '../common/ShlitaLogo.js';
 import {
   LayoutDashboard,
   Bot,
@@ -79,16 +80,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Brand Header */}
       <div className="h-16 flex items-center justify-between px-4 border-b border-border">
         <div
-          className="flex items-center space-x-3 overflow-hidden cursor-pointer"
+          className="flex items-center space-x-3 overflow-hidden cursor-pointer group"
           onClick={() => onSelectScreen('overview')}
         >
-          <div className="h-9 w-9 min-w-9 rounded-xl bg-gradient-to-tr from-accent-violet to-solana flex items-center justify-center font-bold text-white text-lg shadow-sm">
-            ש
-          </div>
+          <ShlitaLogo size={collapsed ? 26 : 30} />
           {!collapsed && (
             <div className="truncate">
-              <span className="font-bold text-sm tracking-tight text-text-primary block">Shlita</span>
-              <span className="text-[10px] text-accent-violet font-mono tracking-wider block uppercase">Control Plane</span>
+              <span className="font-bold text-sm tracking-tight text-text-primary block group-hover:text-accent-violet transition-colors">
+                Shlita
+              </span>
+              <span className="text-[10px] text-accent-violet font-mono tracking-wider block uppercase">
+                Control Plane
+              </span>
             </div>
           )}
         </div>
@@ -263,7 +266,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {!collapsed && (
             <div className="truncate text-left">
               <span className="text-xs font-semibold text-text-primary block truncate">Arnav Patel</span>
-              <span className="text-[10px] text-text-muted font-mono block truncate">AuSt...9R8K (Admin)</span>
+              <span className="text-[10px] text-text-muted font-mono block truncate">Shlt...9R8K (Admin)</span>
             </div>
           )}
         </div>
