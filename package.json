@@ -1,0 +1,35 @@
+{
+  "name": "shlita",
+  "version": "0.1.0",
+  "description": "Financial & Spending Control Plane for Autonomous AI Agents on Solana",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "tsc -b",
+    "start:gateway": "node --loader ts-node/esm packages/gateway/src/index.ts",
+    "demo": "tsx demo/run-demo.ts"
+  },
+  "keywords": [
+    "solana",
+    "ai-agents",
+    "financial-control-plane",
+    "circuit-breaker",
+    "subscriptions"
+  ],
+  "author": "XiaoArnav <322868724+XiaoArnav@users.noreply.github.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.6",
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.95.8",
+    "hono": "^4.6.10"
+  }
+}
