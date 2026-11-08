@@ -10,7 +10,6 @@ import {
   Receipt,
   Webhook,
   Code2,
-  Bell,
   Settings,
   ChevronDown,
   ChevronsLeft,
@@ -61,7 +60,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   const managementItems = [
-    { id: 'notifications', label: 'Notifications', icon: Bell, count: unreadCount },
     { id: 'settings', label: 'Settings & Security', icon: Settings },
   ];
 
