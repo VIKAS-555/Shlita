@@ -1,14 +1,17 @@
 {
-  "name": "shlita",
+  "name": "autostream",
   "version": "0.1.0",
-  "description": "Financial & Spending Control Plane for Autonomous AI Agents on Solana",
+  "description": "AutoStream — Financial & Spending Control Plane for Autonomous AI Agents on Solana",
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "vite",
+    "dev:ui": "vite",
+    "build:ui": "vite build",
+    "build": "tsc -b && vite build",
+    "start": "node --import tsx packages/gateway/src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build": "tsc -b",
-    "start:gateway": "node --loader ts-node/esm packages/gateway/src/index.ts",
     "demo": "tsx demo/run-demo.ts"
   },
   "keywords": [
@@ -20,16 +23,31 @@
   ],
   "author": "XiaoArnav <322868724+XiaoArnav@users.noreply.github.com>",
   "license": "MIT",
-  "devDependencies": {
-    "@types/node": "^22.0.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.6.3",
-    "vitest": "^2.1.4"
-  },
   "dependencies": {
-    "@hono/node-server": "^2.1.6",
+    "@hono/node-server": "^1.13.7",
     "@solana/spl-token": "^0.4.9",
     "@solana/web3.js": "^1.95.8",
-    "hono": "^4.6.10"
+    "clsx": "^2.1.1",
+    "hono": "^4.6.10",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-is": "^19.1.0",
+    "recharts": "^2.13.3",
+    "tailwind-merge": "^2.5.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.4"
   }
 }

@@ -1,0 +1,276 @@
+import React, { useState } from 'react';
+import {
+  Receipt,
+  Search,
+  Filter,
+  CheckCircle2,
+  AlertTriangle,
+  Clock,
+  XCircle,
+  ExternalLink,
+  X,
+  Copy,
+  ShieldAlert,
+} from 'lucide-react';
+import { Transaction, TransactionStatus } from '../../types/dashboard.js';
+
+interface TransactionsScreenProps {
+  transactions: Transaction[];
+  selectedTransaction: Transaction | null;
+  onSelectTransaction: (tx: Transaction | null) => void;
+}
+
+export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
+  transactions,
+  selectedTransaction,
+  onSelectTransaction,
+}) => {
+  const [filterStatus, setFilterStatus] = useState<string>('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [copiedSig, setCopiedSig] = useState(false);
+
+  const filtered = transactions.filter((tx) => {
+    const matchesFilter = filterStatus === 'ALL' || tx.status === filterStatus;
+    const matchesSearch =
+      tx.signature.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      tx.agentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      tx.providerName.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesFilter && matchesSearch;
+  });
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedSig(true);
+    setTimeout(() => setCopiedSig(false), 1500);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
+        <div>
+          <h2 className="text-xl font-bold text-white tracking-tight">Transaction Activity Explorer</h2>
+          <p className="text-xs text-slate-400 mt-1">
+            Complete audit trail of all confirmed on-chain payments and intercepted policy violations.
+          </p>
+        </div>
+      </div>
+
+      {/* Filter Pills & Search (Image 3 layout) */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center space-x-1.5 bg-card border border-border p-1 rounded-xl text-xs font-mono overflow-x-auto">
+          {(['ALL', 'CONFIRMED', 'BLOCKED_BY_POLICY', 'PENDING', 'FAILED'] as const).map((st) => (
+            <button
+              key={st}
+              onClick={() => setFilterStatus(st)}
+              className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition ${
+                filterStatus === st
+                  ? 'bg-accent-violet text-white font-semibold'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {st === 'ALL'
+                ? 'All'
+                : st === 'CONFIRMED'
+                ? 'Success'
+                : st === 'BLOCKED_BY_POLICY'
+                ? 'Blocked'
+                : st}
+            </button>
+          ))}
+        </div>
+
+        <div className="relative max-w-sm w-full">
+          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search by signature, agent, or vendor..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-card border border-border focus:border-accent-violet rounded-xl pl-9 pr-4 py-1.5 text-xs text-white placeholder-slate-500 outline-none transition"
+          />
+        </div>
+      </div>
+
+      {/* Table View (Matching Image 3: Tx Hash, Status, From, To, Amount, Fee, Time) */}
+      <div className="bg-card border border-border rounded-2xl overflow-hidden glow-card">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-950/60 text-slate-400 border-b border-border font-mono text-[11px]">
+              <tr>
+                <th className="py-3.5 px-4">TX HASH / SIGNATURE</th>
+                <th className="py-3.5 px-4">STATUS</th>
+                <th className="py-3.5 px-4">AGENT</th>
+                <th className="py-3.5 px-4">PROVIDER</th>
+                <th className="py-3.5 px-4">AMOUNT</th>
+                <th className="py-3.5 px-4">NETWORK FEE</th>
+                <th className="py-3.5 px-4 text-right">TIME</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40 font-mono">
+              {filtered.map((tx) => (
+                <tr
+                  key={tx.id}
+                  onClick={() => onSelectTransaction(tx)}
+                  className="hover:bg-slate-850/60 transition cursor-pointer group"
+                >
+                  <td className="py-3.5 px-4">
+                    <span className="font-semibold text-accent-violet hover:underline flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-solana"></span>
+                      {tx.signature}
+                    </span>
+                  </td>
+                  <td className="py-3.5 px-4">
+                    {tx.status === 'CONFIRMED' && (
+                      <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full text-[10px]">
+                        <CheckCircle2 size={10} /> Success
+                      </span>
+                    )}
+                    {tx.status === 'BLOCKED_BY_POLICY' && (
+                      <span className="inline-flex items-center gap-1 text-red-400 bg-red-500/10 border border-red-500/30 px-2 py-0.5 rounded-full text-[10px]">
+                        <ShieldAlert size={10} /> Blocked
+                      </span>
+                    )}
+                    {tx.status === 'PENDING' && (
+                      <span className="inline-flex items-center gap-1 text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full text-[10px]">
+                        <Clock size={10} /> Pending
+                      </span>
+                    )}
+                    {tx.status === 'FAILED' && (
+                      <span className="inline-flex items-center gap-1 text-red-400 bg-red-950/40 border border-red-900/60 px-2 py-0.5 rounded-full text-[10px]">
+                        <XCircle size={10} /> Failed
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-3.5 px-4 text-slate-200">{tx.agentName}</td>
+                  <td className="py-3.5 px-4 text-slate-400">{tx.providerName}</td>
+                  <td className="py-3.5 px-4 font-bold text-slate-100">
+                    ${tx.amountUsdc.toFixed(tx.amountUsdc < 1 ? 3 : 2)} {tx.token}
+                  </td>
+                  <td className="py-3.5 px-4 text-slate-400 text-[11px]">
+                    {tx.networkFeeSol > 0 ? `${tx.networkFeeSol.toFixed(6)} SOL` : '0.00 SOL (Blocked)'}
+                  </td>
+                  <td className="py-3.5 px-4 text-right text-slate-400 text-[11px]">
+                    {tx.timestamp}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Transaction Slide-Over Drawer */}
+      {selectedTransaction && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex justify-end">
+          <div className="w-full max-w-lg bg-card border-l border-border h-full p-6 overflow-y-auto space-y-6 animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between pb-4 border-b border-border">
+              <div>
+                <h3 className="font-bold text-white text-base">Transaction Details</h3>
+                <span className="text-xs text-slate-400 font-mono">ID: {selectedTransaction.id}</span>
+              </div>
+              <button
+                onClick={() => onSelectTransaction(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Status Callout */}
+            <div
+              className={`p-4 rounded-xl border space-y-2 ${
+                selectedTransaction.status === 'CONFIRMED'
+                  ? 'bg-emerald-500/10 border-emerald-500/30'
+                  : selectedTransaction.status === 'BLOCKED_BY_POLICY'
+                  ? 'bg-red-500/10 border-red-500/30'
+                  : 'bg-amber-500/10 border-amber-500/30'
+              }`}
+            >
+              <div className="flex items-center justify-between text-xs font-mono font-bold">
+                <span>STATUS: {selectedTransaction.status}</span>
+                <span>{selectedTransaction.timestamp}</span>
+              </div>
+              {selectedTransaction.failureReason && (
+                <p className="text-xs text-slate-200 font-sans mt-1">
+                  <strong>Enforcement Verdict:</strong> {selectedTransaction.failureReason}
+                </p>
+              )}
+            </div>
+
+            {/* Signature & Solana Explorer */}
+            <div className="space-y-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
+                Transaction Signature
+              </span>
+              <div className="bg-slate-950 p-3 rounded-xl border border-border flex items-center justify-between text-xs font-mono">
+                <span className="text-accent-violet truncate">{selectedTransaction.signature}</span>
+                <button
+                  onClick={() => handleCopy(selectedTransaction.signature)}
+                  className="p-1 text-slate-400 hover:text-white ml-2 transition"
+                  title="Copy signature"
+                >
+                  <Copy size={14} />
+                </button>
+              </div>
+              {selectedTransaction.status === 'CONFIRMED' && (
+                <a
+                  href={selectedTransaction.solanaExplorerUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs text-solana hover:underline font-mono"
+                >
+                  <span>View on Solana Explorer</span>
+                  <ExternalLink size={12} />
+                </a>
+              )}
+            </div>
+
+            {/* Financial Ledger */}
+            <div className="grid grid-cols-2 gap-3 text-xs font-mono bg-slate-900 p-3.5 rounded-xl border border-border">
+              <div>
+                <span className="text-slate-500 block text-[10px]">TRANSFER AMOUNT</span>
+                <span className="text-white font-bold text-sm">
+                  ${selectedTransaction.amountUsdc.toFixed(selectedTransaction.amountUsdc < 1 ? 3 : 2)} USDC
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-500 block text-[10px]">NETWORK FEE</span>
+                <span className="text-slate-300 font-bold text-sm">
+                  {selectedTransaction.networkFeeSol.toFixed(6)} SOL
+                </span>
+              </div>
+              <div className="col-span-2 pt-2 border-t border-border/60">
+                <span className="text-slate-500 block text-[10px]">POLICY APPLIED</span>
+                <span className="text-accent-violet font-semibold">{selectedTransaction.policyUsed}</span>
+              </div>
+            </div>
+
+            {/* Addresses */}
+            <div className="space-y-3 text-xs font-mono">
+              <div>
+                <span className="text-slate-500 block text-[10px]">SENDER (AGENT PDA)</span>
+                <span className="text-slate-300 bg-slate-950 px-3 py-1.5 rounded-lg border border-border block truncate">
+                  {selectedTransaction.fromAddress}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-500 block text-[10px]">RECEIVER (VENDOR ATA)</span>
+                <span className="text-slate-300 bg-slate-950 px-3 py-1.5 rounded-lg border border-border block truncate">
+                  {selectedTransaction.toAddress}
+                </span>
+              </div>
+            </div>
+
+            {/* Webhook Dispatch Log */}
+            <div className="bg-slate-950 p-3 rounded-xl border border-border/80 space-y-1 text-xs font-mono">
+              <span className="text-slate-500 text-[10px] block">WEBHOOK EVENT</span>
+              <div className="text-emerald-400">event: "transaction.{selectedTransaction.status.toLowerCase()}"</div>
+              <div className="text-slate-400 text-[11px]">Dispatched to https://api.trion.org/webhooks/autostream</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
