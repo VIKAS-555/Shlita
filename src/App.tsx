@@ -14,6 +14,7 @@ import { SettingsScreen } from './components/screens/SettingsScreen.js';
 import { CreateAgentWizard } from './components/modals/CreateAgentWizard.js';
 import { AttackSimulatorModal, SimulatorExecutionResult } from './components/simulator/AttackSimulatorModal.js';
 import { CommandPalette } from './components/palette/CommandPalette.js';
+import { TelemetryDrawer, TelemetryEvent } from './components/telemetry/TelemetryDrawer.js';
 import {
   INITIAL_AGENTS,
   INITIAL_NOTIFICATIONS,
@@ -21,8 +22,65 @@ import {
   INITIAL_PROVIDERS,
   INITIAL_SUBSCRIPTIONS,
   INITIAL_TRANSACTIONS,
+  INITIAL_PENDING_APPROVALS,
 } from './data/mockData.js';
-import { Agent, SpendingPolicy, Provider, Subscription, Transaction, NotificationItem } from './types/dashboard.js';
+import {
+  Agent,
+  SpendingPolicy,
+  Provider,
+  Subscription,
+  Transaction,
+  NotificationItem,
+  PendingApproval,
+} from './types/dashboard.js';
+
+const INITIAL_TELEMETRY_EVENTS: TelemetryEvent[] = [
+  {
+    id: 'tel-01',
+    timestamp: '17:10:04.120',
+    type: 'APPROVED',
+    statusCode: 200,
+    agent: 'research-agent-01',
+    vendor: 'api.helius.xyz',
+    amountUsdc: 0.02,
+    latencyMs: 0.14,
+    signature: '5sol_auth_8k39f1',
+    details: { method: 'POST', path: '/v0/token-metadata', policy: 'Tier 1 — Fast-Path' },
+  },
+  {
+    id: 'tel-02',
+    timestamp: '17:11:15.890',
+    type: 'BLOCKED',
+    statusCode: 403,
+    agent: 'research-agent-01',
+    vendor: 'evil-drainer-api.org',
+    amountUsdc: 50.00,
+    latencyMs: 0.06,
+    details: { reason: 'Unwhitelisted target domain rejected at perimeter', policy: 'Tier 1' },
+  },
+  {
+    id: 'tel-03',
+    timestamp: '17:12:44.301',
+    type: 'CIRCUIT',
+    statusCode: 429,
+    agent: 'arbitrage-bot-alpha',
+    vendor: 'api.jup.ag',
+    amountUsdc: 100.00,
+    latencyMs: 0.09,
+    details: { reason: 'Rate anomaly: 14 calls/min exceeded limit (12/min)', tripThreshold: '12' },
+  },
+  {
+    id: 'tel-04',
+    timestamp: '17:13:02.441',
+    type: 'MULTISIG',
+    statusCode: 202,
+    agent: 'procurement-agent-v2',
+    vendor: 'api.aws.amazon.com',
+    amountUsdc: 500.00,
+    latencyMs: 0.22,
+    details: { squadsThreshold: '2/3', signers: ['XiaoArnav', 'Jesse'] },
+  },
+];
 
 export const App: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<ScreenId>('overview');
@@ -46,7 +104,7 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Black & White Theme Switcher (Dark / Light)
+  // Theme Switcher (Dark / Light)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     const saved = localStorage.getItem('shlita_theme');
     return (saved === 'light' || saved === 'dark') ? saved : 'dark';
@@ -72,6 +130,8 @@ export const App: React.FC = () => {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>(INITIAL_SUBSCRIPTIONS);
   const [transactions, setTransactions] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
   const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
+  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>(INITIAL_PENDING_APPROVALS);
+  const [telemetryEvents, setTelemetryEvents] = useState<TelemetryEvent[]>(INITIAL_TELEMETRY_EVENTS);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
 
   const [walletBalanceUsdc, setWalletBalanceUsdc] = useState(4250.00);
@@ -79,6 +139,18 @@ export const App: React.FC = () => {
 
   // Unread notifications count
   const unreadCount = notifications.filter((n) => n.unread).length;
+
+  // --- Telemetry Dispatcher Helper ---
+  const addTelemetryLog = (event: Omit<TelemetryEvent, 'id' | 'timestamp'>) => {
+    const now = new Date();
+    const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}.${now.getMilliseconds().toString().padStart(3, '0')}`;
+    const newEv: TelemetryEvent = {
+      ...event,
+      id: `tel-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      timestamp: timeStr,
+    };
+    setTelemetryEvents((prev) => [newEv, ...prev]);
+  };
 
   // --- Handlers ---
   const handleToggleAgentPause = (agentId: string) => {
@@ -102,6 +174,15 @@ export const App: React.FC = () => {
         return a;
       })
     );
+    addTelemetryLog({
+      type: 'APPROVED',
+      statusCode: 200,
+      agent: agentId,
+      vendor: 'circuit-reset-relay',
+      amountUsdc: 0,
+      latencyMs: 0.05,
+      details: { action: 'CIRCUIT_BREAKER_RESET', operator: 'XiaoArnav' },
+    });
     setNotifications((prev) => [
       {
         id: `notif-${Date.now()}`,
@@ -117,6 +198,15 @@ export const App: React.FC = () => {
 
   const handleAddAgent = (newAgent: Agent) => {
     setAgents([newAgent, ...agents]);
+    addTelemetryLog({
+      type: 'APPROVED',
+      statusCode: 201,
+      agent: newAgent.name,
+      vendor: 'solana-subscriptions-pda',
+      amountUsdc: 0,
+      latencyMs: 0.18,
+      details: { action: 'CREATE_AGENT', wallet: newAgent.walletAddress, dailyBudget: newAgent.dailyBudgetUsdc },
+    });
     setNotifications((prev) => [
       {
         id: `notif-${Date.now()}`,
@@ -160,6 +250,121 @@ export const App: React.FC = () => {
     );
   };
 
+  // --- Interactive Agents Screen Handlers ---
+  const handleUpdateAgentBudget = (agentId: string, dailyBudget: number, monthlyBudget: number) => {
+    setAgents((prev) =>
+      prev.map((a) =>
+        a.id === agentId ? { ...a, dailyBudgetUsdc: dailyBudget, monthlyBudgetUsdc: monthlyBudget } : a
+      )
+    );
+    addTelemetryLog({
+      type: 'APPROVED',
+      statusCode: 200,
+      agent: agentId,
+      vendor: 'solana-subscriptions',
+      amountUsdc: dailyBudget,
+      latencyMs: 0.12,
+      details: { action: 'UPDATE_BUDGET', dailyBudget, monthlyBudget },
+    });
+  };
+
+  const handleUpdateAgentVendors = (agentId: string, vendors: string[]) => {
+    setAgents((prev) =>
+      prev.map((a) => (a.id === agentId ? { ...a, allowedVendors: vendors } : a))
+    );
+    addTelemetryLog({
+      type: 'APPROVED',
+      statusCode: 200,
+      agent: agentId,
+      vendor: 'policy-gateway',
+      amountUsdc: 0,
+      latencyMs: 0.08,
+      details: { action: 'UPDATE_WHITELIST', count: vendors.length, vendors },
+    });
+  };
+
+  const handleMasterTogglePauseAll = (freeze: boolean) => {
+    setAgents((prev) => prev.map((a) => ({ ...a, status: freeze ? 'PAUSED' : 'ACTIVE' })));
+    addTelemetryLog({
+      type: freeze ? 'BLOCKED' : 'APPROVED',
+      statusCode: freeze ? 403 : 200,
+      agent: 'FLEET_ALL',
+      vendor: 'perimeter-firewall',
+      amountUsdc: 0,
+      latencyMs: 0.15,
+      details: { action: freeze ? 'EMERGENCY_FREEZE_ALL' : 'FLEET_RESUME_ALL' },
+    });
+    setNotifications((prev) => [
+      {
+        id: `notif-${Date.now()}`,
+        title: freeze ? '🚨 Fleet Master Freeze Engaged' : 'Fleet Active Status Restored',
+        description: freeze ? 'All agents paused via control plane master switch.' : 'All agents resumed by operator.',
+        timestamp: 'Just now',
+        unread: true,
+        type: freeze ? 'VIOLATION' : 'SUCCESS',
+      },
+      ...prev,
+    ]);
+  };
+
+  // --- Squads Multi-Sig Approval Handler ---
+  const handleConfirmMultiSigApproval = (item: {
+    id: string;
+    agentName: string;
+    amountUsdc: number;
+    provider: string;
+  }) => {
+    setPendingApprovals((prev) => prev.filter((p) => p.id !== item.id));
+
+    const newTx: Transaction = {
+      id: `tx-multisig-${Date.now()}`,
+      signature: `5sqds_${Math.random().toString(36).substring(2, 8)}`,
+      agentId: item.agentName,
+      agentName: item.agentName,
+      providerId: 'prov-squads',
+      providerName: item.provider,
+      amountUsdc: item.amountUsdc,
+      token: 'USDC',
+      timestamp: 'Just now',
+      status: 'CONFIRMED',
+      networkFeeSol: 0.00001,
+      policyUsed: 'Tier 3 — High-Security Multi-Sig',
+      solanaExplorerUrl: 'https://explorer.solana.com/tx/squads-confirmed',
+      fromAddress: 'SQDS4...88xK (Squads Vault)',
+      toAddress: `${item.provider.split('.')[0]}...PDA`,
+    };
+
+    setTransactions((prev) => [newTx, ...prev]);
+    setWalletBalanceUsdc((prev) => Math.max(0, prev - item.amountUsdc));
+
+    addTelemetryLog({
+      type: 'MULTISIG',
+      statusCode: 200,
+      agent: item.agentName,
+      vendor: item.provider,
+      amountUsdc: item.amountUsdc,
+      latencyMs: 0.24,
+      signature: newTx.signature,
+      details: {
+        squadsVault: 'SQDS4...88xK',
+        thresholdMet: '2/3',
+        coSigners: ['Arnav Patel (XiaoArnav)', 'Jesse (Lead DevOps)'],
+      },
+    });
+
+    setNotifications((prev) => [
+      {
+        id: `notif-${Date.now()}`,
+        title: `Squads Multi-Sig Approved: ${item.agentName}`,
+        description: `Allowance of $${item.amountUsdc.toLocaleString()} USDC for ${item.provider} co-signed and dispatched.`,
+        timestamp: 'Just now',
+        unread: true,
+        type: 'SUCCESS',
+      },
+      ...prev,
+    ]);
+  };
+
   // --- CENTERPIECE SIMULATION FLOW ---
   const handleRunSimulation = () => {
     if (simulationStep === 0) {
@@ -191,6 +396,18 @@ export const App: React.FC = () => {
             : a
         )
       );
+
+      addTelemetryLog({
+        type: 'APPROVED',
+        statusCode: 200,
+        agent: 'research-agent-01',
+        vendor: 'api.helius.xyz',
+        amountUsdc: 0.02,
+        latencyMs: 0.12,
+        signature: newTx.signature,
+        details: { route: '/v0/token-metadata', policy: 'Tier 1 — Autonomous Fast-Path' },
+      });
+
       setNotifications((prev) => [
         {
           id: `notif-${Date.now()}`,
@@ -226,6 +443,17 @@ export const App: React.FC = () => {
 
       setTransactions([blockedTx, ...transactions]);
       setSelectedTransaction(blockedTx);
+
+      addTelemetryLog({
+        type: 'BLOCKED',
+        statusCode: 403,
+        agent: 'research-agent-01',
+        vendor: 'Helius Bulk Data Export',
+        amountUsdc: 0.08,
+        latencyMs: 0.07,
+        details: { reason: 'Cost exceeds $0.05 limit. Intercepted by Shlita Perimeter.' },
+      });
+
       setNotifications((prev) => [
         {
           id: `notif-${Date.now()}`,
@@ -275,6 +503,18 @@ export const App: React.FC = () => {
             : a
         )
       );
+
+      addTelemetryLog({
+        type: 'APPROVED',
+        statusCode: 200,
+        agent: agentName,
+        vendor: result.vendor,
+        amountUsdc: result.amountUsdc,
+        latencyMs: 0.16,
+        signature: newTx.signature,
+        details: { simulated: true, action: 'ATTACK_SIMULATOR_ALLOW' },
+      });
+
       setNotifications((prev) => [
         {
           id: `notif-${Date.now()}`,
@@ -307,6 +547,17 @@ export const App: React.FC = () => {
       };
       setTransactions((prev) => [blockedTx, ...prev]);
       setSelectedTransaction(blockedTx);
+
+      addTelemetryLog({
+        type: 'BLOCKED',
+        statusCode: 403,
+        agent: agentName,
+        vendor: result.vendor,
+        amountUsdc: result.amountUsdc,
+        latencyMs: 0.08,
+        details: { reason: result.reason || 'Blocked by Shlita Perimeter firewall' },
+      });
+
       setNotifications((prev) => [
         {
           id: `notif-${Date.now()}`,
@@ -324,6 +575,17 @@ export const App: React.FC = () => {
           a.id === result.agentId ? { ...a, status: 'CIRCUIT_TRIPPED', lastActive: 'Loop anomaly detected' } : a
         )
       );
+
+      addTelemetryLog({
+        type: 'CIRCUIT',
+        statusCode: 429,
+        agent: agentName,
+        vendor: result.vendor,
+        amountUsdc: result.amountUsdc,
+        latencyMs: 0.11,
+        details: { reason: 'Velocity limit exceeded. Circuit tripped. Agent paused.' },
+      });
+
       setNotifications((prev) => [
         {
           id: `notif-${Date.now()}`,
@@ -340,24 +602,22 @@ export const App: React.FC = () => {
 
   // --- EMERGENCY MASTER ACTIONS (COMMAND PALETTE) ---
   const handleEmergencyFreezeAll = () => {
-    setAgents((prev) => prev.map((a) => ({ ...a, status: 'PAUSED' })));
-    setNotifications((prev) => [
-      {
-        id: `notif-${Date.now()}`,
-        title: '🚨 Master Freeze Engaged',
-        description: 'All 6 autonomous agents have been paused by operator command.',
-        timestamp: 'Just now',
-        unread: true,
-        type: 'VIOLATION',
-      },
-      ...prev,
-    ]);
+    handleMasterTogglePauseAll(true);
   };
 
   const handleResetAllCircuits = () => {
     setAgents((prev) =>
       prev.map((a) => (a.status === 'CIRCUIT_TRIPPED' ? { ...a, status: 'ACTIVE' } : a))
     );
+    addTelemetryLog({
+      type: 'APPROVED',
+      statusCode: 200,
+      agent: 'FLEET_ALL',
+      vendor: 'circuit-reset-relay',
+      amountUsdc: 0,
+      latencyMs: 0.12,
+      details: { action: 'RESET_ALL_CIRCUITS', operator: 'XiaoArnav' },
+    });
     setNotifications((prev) => [
       {
         id: `notif-${Date.now()}`,
@@ -403,6 +663,7 @@ export const App: React.FC = () => {
         collapsed={collapsedSidebar}
         onToggleCollapse={() => setCollapsedSidebar(!collapsedSidebar)}
         unreadCount={unreadCount}
+        pendingApprovalsCount={pendingApprovals.length}
       />
 
       {/* Main Workspace Body */}
@@ -425,7 +686,7 @@ export const App: React.FC = () => {
         />
 
         {/* Screen Routing */}
-        <main className="flex-1 p-6 lg:p-8 max-w-7xl w-full mx-auto">
+        <main className="flex-1 p-6 lg:p-8 max-w-7xl w-full mx-auto pb-20">
           {currentScreen === 'overview' && (
             <OverviewScreen
               agents={agents}
@@ -446,11 +707,19 @@ export const App: React.FC = () => {
               onOpenCreateWizard={() => setIsCreateWizardOpen(true)}
               onToggleAgentPause={handleToggleAgentPause}
               onResetCircuitBreaker={handleResetCircuitBreaker}
+              onUpdateAgentBudget={handleUpdateAgentBudget}
+              onUpdateAgentVendors={handleUpdateAgentVendors}
+              onMasterTogglePauseAll={handleMasterTogglePauseAll}
             />
           )}
 
           {currentScreen === 'policies' && (
-            <PoliciesScreen policies={policies} onAddPolicy={handleAddPolicy} />
+            <PoliciesScreen
+              policies={policies}
+              onAddPolicy={handleAddPolicy}
+              pendingApprovals={pendingApprovals}
+              onApproveMultiSig={handleConfirmMultiSigApproval}
+            />
           )}
 
           {currentScreen === 'providers' && (
@@ -482,7 +751,10 @@ export const App: React.FC = () => {
           )}
 
           {(currentScreen === 'api-sdk' || currentScreen === 'webhooks') && (
-            <DeveloperScreen />
+            <DeveloperScreen
+              agents={agents}
+              onLogTelemetry={(ev) => setTelemetryEvents((prev) => [ev, ...prev])}
+            />
           )}
 
           {currentScreen === 'notifications' && (
@@ -527,6 +799,12 @@ export const App: React.FC = () => {
         onEmergencyFreezeAll={handleEmergencyFreezeAll}
         onResetAllCircuits={handleResetAllCircuits}
         onExportCsv={handleExportCsv}
+      />
+
+      {/* Real-Time Cyberpunk Live Telemetry Console Drawer */}
+      <TelemetryDrawer
+        events={telemetryEvents}
+        onClearEvents={() => setTelemetryEvents([])}
       />
     </div>
   );

@@ -100,3 +100,17 @@ export interface NotificationItem {
   unread: boolean;
   type: 'VIOLATION' | 'FAILED_PAYMENT' | 'THRESHOLD_WARNING' | 'AUTH_UPDATE' | 'SUCCESS';
 }
+
+export interface PendingApproval {
+  id: string;
+  agentId: string;
+  agentName: string;
+  amountUsdc: number;
+  provider: string;
+  reason: string;
+  requestedBy: string;
+  timestamp: string;
+  requiredSignatures: number;
+  currentSignatures: number;
+}
+

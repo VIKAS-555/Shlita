@@ -4,20 +4,37 @@ import {
   Plus,
   Copy,
   Trash2,
+  Users,
+  CheckCircle2,
+  Clock,
+  ArrowRight,
+  ExternalLink,
 } from 'lucide-react';
-import { EnforcementType, SpendingPolicy } from '../../types/dashboard.js';
+import { EnforcementType, SpendingPolicy, PendingApproval } from '../../types/dashboard.js';
+import { MultiSigApprovalModal } from '../modals/MultiSigApprovalModal.js';
 
 interface PoliciesScreenProps {
   policies: SpendingPolicy[];
   onAddPolicy: (policy: SpendingPolicy) => void;
+  pendingApprovals?: PendingApproval[];
+  onApproveMultiSig?: (item: {
+    id: string;
+    agentName: string;
+    amountUsdc: number;
+    provider: string;
+  }) => void;
 }
 
 export const PoliciesScreen: React.FC<PoliciesScreenProps> = ({
   policies,
   onAddPolicy,
+  pendingApprovals = [],
+  onApproveMultiSig,
 }) => {
   const [selectedEnforcement, setSelectedEnforcement] = useState<string>('ALL');
   const [showNewPolicyModal, setShowNewPolicyModal] = useState(false);
+  const [activeApproval, setActiveApproval] = useState<PendingApproval | null>(null);
+  const [isMultiSigModalOpen, setIsMultiSigModalOpen] = useState(false);
 
   const [newPolicyName, setNewPolicyName] = useState('');
   const [newMaxPerCall, setNewMaxPerCall] = useState('0.10');
@@ -51,6 +68,22 @@ export const PoliciesScreen: React.FC<PoliciesScreenProps> = ({
     };
     onAddPolicy(created);
     setShowNewPolicyModal(false);
+  };
+
+  const handleOpenMultiSig = (item: PendingApproval) => {
+    setActiveApproval(item);
+    setIsMultiSigModalOpen(true);
+  };
+
+  const handleConfirmMultiSig = (item: {
+    id: string;
+    agentName: string;
+    amountUsdc: number;
+    provider: string;
+  }) => {
+    if (onApproveMultiSig) {
+      onApproveMultiSig(item);
+    }
   };
 
   return (
@@ -120,13 +153,90 @@ export const PoliciesScreen: React.FC<PoliciesScreenProps> = ({
         </div>
       </div>
 
+      {/* SQUADS MULTI-SIG APPROVALS QUEUE */}
+      {pendingApprovals.length > 0 && (
+        <div className="bg-card border border-accent-violet/30 rounded-2xl p-6 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-border">
+            <div className="flex items-center space-x-2.5">
+              <div className="p-2 rounded-xl bg-accent-violet/10 text-accent-violet border border-accent-violet/20">
+                <Users size={16} />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h3 className="font-bold text-sm text-text-primary tracking-tight">
+                    Squads Multi-Sig Approvals Queue
+                  </h3>
+                  <span className="text-[10px] font-mono bg-accent-violet/15 text-accent-violet px-2 py-0.5 rounded-full font-bold">
+                    {pendingApprovals.length} PENDING
+                  </span>
+                </div>
+                <p className="text-xs text-text-muted mt-0.5">
+                  High-value allowance revisions exceeding $500.00 USDC requiring 2-of-3 threshold co-signatures.
+                </p>
+              </div>
+            </div>
+            <span className="text-[11px] font-mono text-text-muted">
+              Squads Vault: <span className="text-text-primary">SQDS4...88xK</span>
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {pendingApprovals.map((item) => (
+              <div
+                key={item.id}
+                className="bg-card-elevated border border-border hover:border-accent-violet/40 rounded-xl p-4 flex flex-col justify-between transition space-y-3"
+              >
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-[11px] font-mono">
+                    <span className="text-text-muted">{item.id}</span>
+                    <span className="text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full font-bold text-[10px]">
+                      {item.currentSignatures}/{item.requiredSignatures} SIGNED
+                    </span>
+                  </div>
+
+                  <div>
+                    <div className="text-lg font-extrabold text-text-primary font-mono">
+                      ${item.amountUsdc.toLocaleString('en-US', { minimumFractionDigits: 2 })}{' '}
+                      <span className="text-xs text-text-muted font-normal">USDC</span>
+                    </div>
+                    <div className="text-xs font-semibold text-text-primary mt-1 font-mono">
+                      {item.agentName}
+                    </div>
+                    <div className="text-[11px] text-text-muted mt-0.5">
+                      Target: <span className="text-cyan-400 font-mono">{item.provider}</span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-text-secondary line-clamp-2 leading-relaxed">
+                    {item.reason}
+                  </p>
+                </div>
+
+                <div className="pt-2 border-t border-border flex items-center justify-between">
+                  <span className="text-[10px] text-text-muted font-mono flex items-center gap-1">
+                    <Clock size={11} /> {item.timestamp}
+                  </span>
+                  <button
+                    onClick={() => handleOpenMultiSig(item)}
+                    className="flex items-center gap-1 bg-accent-violet hover:bg-accent-violet/90 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition shadow-sm cursor-pointer"
+                  >
+                    <span>Review & Co-Sign</span>
+                    <ArrowRight size={12} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Filter Tabs */}
       <div className="flex items-center space-x-2 text-xs font-mono">
         {(['ALL', 'ON_CHAIN', 'GATEWAY', 'OFF_CHAIN_ALERT'] as const).map((tier) => (
           <button
             key={tier}
             onClick={() => setSelectedEnforcement(tier)}
-            className={`px-3 py-1.5 rounded-xl border transition ${
+            className={`px-3 py-1.5 rounded-xl border transition cursor-pointer ${
               selectedEnforcement === tier
                 ? 'bg-accent-violet text-white font-semibold border-accent-violet shadow-sm'
                 : 'bg-card border-border text-text-muted hover:text-text-primary'
@@ -218,10 +328,10 @@ export const PoliciesScreen: React.FC<PoliciesScreenProps> = ({
               <div className="flex items-center justify-between pt-3 border-t border-border/80 text-xs text-text-muted font-mono">
                 <span>{policy.assignedAgentsCount} active agents assigned</span>
                 <div className="flex items-center space-x-2">
-                  <button className="hover:text-text-primary p-1 rounded transition" title="Duplicate">
+                  <button className="hover:text-text-primary p-1 rounded transition cursor-pointer" title="Duplicate">
                     <Copy size={14} />
                   </button>
-                  <button className="hover:text-red-500 p-1 rounded transition" title="Delete">
+                  <button className="hover:text-red-500 p-1 rounded transition cursor-pointer" title="Delete">
                     <Trash2 size={14} />
                   </button>
                 </div>
@@ -285,13 +395,13 @@ export const PoliciesScreen: React.FC<PoliciesScreenProps> = ({
             <div className="flex justify-end space-x-3 pt-3 border-t border-border">
               <button
                 onClick={() => setShowNewPolicyModal(false)}
-                className="px-4 py-2 text-xs text-text-muted hover:text-text-primary transition"
+                className="px-4 py-2 text-xs text-text-muted hover:text-text-primary transition cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={handleCreatePolicy}
-                className="bg-accent-violet hover:bg-accent-violet/90 text-white font-semibold text-xs px-4 py-2 rounded-xl transition shadow-sm"
+                className="bg-accent-violet hover:bg-accent-violet/90 text-white font-semibold text-xs px-4 py-2 rounded-xl transition shadow-sm cursor-pointer"
               >
                 Create Policy
               </button>
@@ -299,6 +409,14 @@ export const PoliciesScreen: React.FC<PoliciesScreenProps> = ({
           </div>
         </div>
       )}
+
+      {/* Squads Multi-Sig Approval Modal */}
+      <MultiSigApprovalModal
+        isOpen={isMultiSigModalOpen}
+        onClose={() => setIsMultiSigModalOpen(false)}
+        approvalItem={activeApproval}
+        onConfirmApproval={handleConfirmMultiSig}
+      />
     </div>
   );
 };

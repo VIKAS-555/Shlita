@@ -1,6 +1,7 @@
 import {
   Agent,
   NotificationItem,
+  PendingApproval,
   Provider,
   SpendingPolicy,
   Subscription,
@@ -459,3 +460,43 @@ export const INITIAL_NOTIFICATIONS: NotificationItem[] = [
     type: 'SUCCESS',
   },
 ];
+
+export const INITIAL_PENDING_APPROVALS: PendingApproval[] = [
+  {
+    id: 'appr-101',
+    agentId: 'agent-research-01',
+    agentName: 'research-agent-01',
+    amountUsdc: 6200.00,
+    provider: 'Helius RPC & Bulk Data Export',
+    reason: 'Monthly allowance expansion for deep Solana ledger indexing & archival queries',
+    requestedBy: 'research-agent-01 (Automated Request)',
+    timestamp: '12 min ago',
+    requiredSignatures: 2,
+    currentSignatures: 1,
+  },
+  {
+    id: 'appr-102',
+    agentId: 'agent-procure-v2',
+    agentName: 'procurement-agent-v2',
+    amountUsdc: 1500.00,
+    provider: 'RunPod Decentralized GPU Cloud',
+    reason: 'New vendor whitelist addition & spot instance burst compute authorization',
+    requestedBy: 'procurement-agent-v2 (Pipeline)',
+    timestamp: '35 min ago',
+    requiredSignatures: 2,
+    currentSignatures: 1,
+  },
+  {
+    id: 'appr-103',
+    agentId: 'agent-dev-prod',
+    agentName: 'dev-agent-prod',
+    amountUsdc: 750.00,
+    provider: 'Vercel Enterprise Edge Runtime',
+    reason: 'One-off staging environment preview scale-out limit elevation',
+    requestedBy: 'Jesse (Lead DevOps)',
+    timestamp: '2 hours ago',
+    requiredSignatures: 2,
+    currentSignatures: 1,
+  },
+];
+

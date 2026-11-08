@@ -7,9 +7,17 @@ import {
   EyeOff,
   Terminal,
   Send,
+  Cpu,
 } from 'lucide-react';
+import { Agent } from '../../types/dashboard.js';
+import { SolanaPdaInspector } from '../developer/SolanaPdaInspector.js';
 
-export const DeveloperScreen: React.FC = () => {
+interface DeveloperScreenProps {
+  agents?: Agent[];
+  onLogTelemetry?: (event: any) => void;
+}
+
+export const DeveloperScreen: React.FC<DeveloperScreenProps> = ({ agents = [], onLogTelemetry }) => {
   const [activeLang, setActiveLang] = useState<'curl' | 'nodejs' | 'python' | 'solana'>('nodejs');
   const [showKey, setShowKey] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
@@ -99,25 +107,54 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
       setIsRunningSandbox(false);
       const cost = Number(sandboxAmount);
       if (sandboxVendor === 'evil-drainer-api.org') {
-        setSandboxResponse({
+        const resp = {
           status: 403,
           allowed: false,
           error: 'POLICY_VIOLATION',
           reason: 'UNAPPROVED_VENDOR',
           message: 'Target vendor evil-drainer-api.org is not in agent whitelist.',
           timestamp: new Date().toISOString(),
-        });
-      } else if (cost > 0.05) {
-        setSandboxResponse({
+        };
+        setSandboxResponse(resp);
+        if (onLogTelemetry) {
+          onLogTelemetry({
+            id: `tel-${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString(),
+            type: 'BLOCKED',
+            statusCode: 403,
+            agent: sandboxAgent,
+            vendor: sandboxVendor,
+            amountUsdc: cost,
+            latencyMs: 0.08,
+            details: resp,
+          });
+        }
+      } else if (cost > 0.05 && sandboxAgent === 'agent-researcher-01') {
+        const resp = {
           status: 403,
           allowed: false,
           error: 'POLICY_VIOLATION',
           reason: 'PER_CALL_LIMIT_EXCEEDED',
           message: `Request cost ($${cost.toFixed(2)}) exceeds per-call limit ($0.05 USDC).`,
           timestamp: new Date().toISOString(),
-        });
+        };
+        setSandboxResponse(resp);
+        if (onLogTelemetry) {
+          onLogTelemetry({
+            id: `tel-${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString(),
+            type: 'BLOCKED',
+            statusCode: 403,
+            agent: sandboxAgent,
+            vendor: sandboxVendor,
+            amountUsdc: cost,
+            latencyMs: 0.06,
+            details: resp,
+          });
+        }
       } else {
-        setSandboxResponse({
+        const sig = `5sol_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        const resp = {
           status: 200,
           allowed: true,
           vendor: sandboxVendor,
@@ -125,20 +162,35 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
             costMicroUsdc: Math.round(cost * 1_000_000).toString(),
             currency: 'USDC',
             status: 'SETTLED',
-            txSignature: `5sol_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+            txSignature: sig,
           },
           upstream: {
             network: 'solana-mainnet-beta',
             slot: 318492048,
             result: 'Query successfully dispatched and settled.',
           },
-        });
+        };
+        setSandboxResponse(resp);
+        if (onLogTelemetry) {
+          onLogTelemetry({
+            id: `tel-${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString(),
+            type: 'APPROVED',
+            statusCode: 200,
+            agent: sandboxAgent,
+            vendor: sandboxVendor,
+            amountUsdc: cost,
+            latencyMs: 0.14,
+            signature: sig,
+            details: resp,
+          });
+        }
       }
     }, 500);
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
         <div>
@@ -162,7 +214,7 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
           </div>
           <button
             onClick={() => copyToClipboard(apiKey, true)}
-            className="flex items-center gap-1.5 bg-card-elevated hover:bg-border text-text-primary border border-border text-xs px-3.5 py-1.5 rounded-xl transition shadow-sm"
+            className="flex items-center gap-1.5 bg-card-elevated hover:bg-border text-text-primary border border-border text-xs px-3.5 py-1.5 rounded-xl transition shadow-sm cursor-pointer"
           >
             {copiedKey ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
             <span>{copiedKey ? 'Copied!' : 'Copy Key'}</span>
@@ -175,14 +227,14 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
           </span>
           <button
             onClick={() => setShowKey(!showKey)}
-            className="text-text-muted hover:text-text-primary transition"
+            className="text-text-muted hover:text-text-primary p-1 rounded transition cursor-pointer"
           >
             {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
           </button>
         </div>
       </div>
 
-      {/* Code Sandbox & Docs */}
+      {/* 2-Column: SDK Usage Snippets & Sandbox */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left: Code Snippets */}
         <div className="bg-card border border-border rounded-2xl p-6 shadow-sm flex flex-col justify-between">
@@ -190,13 +242,13 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
             <div className="flex items-center justify-between pb-3 border-b border-border">
               <div className="flex items-center space-x-2">
                 <Terminal size={16} className="text-accent-violet" />
-                <h4 className="font-bold text-text-primary text-sm">Agent Gateway Request</h4>
+                <h4 className="font-bold text-text-primary text-sm">SDK Integration Snippets</h4>
               </div>
               <button
                 onClick={() => copyToClipboard(snippets[activeLang])}
-                className="text-xs text-text-muted hover:text-text-primary flex items-center gap-1 font-mono transition"
+                className="flex items-center space-x-1.5 text-xs text-text-muted hover:text-text-primary cursor-pointer"
               >
-                {copiedSnippet ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                {copiedSnippet ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
                 <span>{copiedSnippet ? 'Copied' : 'Copy'}</span>
               </button>
             </div>
@@ -207,7 +259,7 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
                 <button
                   key={lang}
                   onClick={() => setActiveLang(lang)}
-                  className={`px-3 py-1 rounded-lg text-xs font-mono uppercase transition ${
+                  className={`px-3 py-1 rounded-lg text-xs font-mono uppercase transition cursor-pointer ${
                     activeLang === lang
                       ? 'bg-accent-violet text-white font-bold shadow-sm'
                       : 'bg-card-elevated text-text-muted hover:text-text-primary'
@@ -276,7 +328,7 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
             <button
               onClick={handleRunSandbox}
               disabled={isRunningSandbox}
-              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-accent-violet to-solana-purple hover:opacity-95 text-white font-bold text-xs py-2.5 rounded-xl transition cursor-pointer shadow-sm"
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-accent-violet to-solana-purple hover:opacity-95 text-white font-bold text-xs py-2.5 rounded-xl transition cursor-pointer shadow-sm disabled:opacity-50"
             >
               <Send size={14} />
               <span>{isRunningSandbox ? 'Evaluating Policy...' : 'Send Gateway Request'}</span>
@@ -299,6 +351,19 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
             </div>
           )}
         </div>
+      </div>
+
+      {/* Web3 Solana Cryptographic PDA Derivation Tool */}
+      <div className="space-y-3">
+        <div>
+          <h3 className="text-base font-bold text-text-primary tracking-tight">
+            Solana Subscriptions Cryptographic PDA Derivation Tool
+          </h3>
+          <p className="text-xs text-text-muted mt-0.5">
+            Direct Web3 inspector computing non-custodial Program Derived Addresses (<code className="font-mono text-solana">findProgramAddressSync</code>) with <code className="font-mono text-text-primary">@solana/web3.js</code>.
+          </p>
+        </div>
+        <SolanaPdaInspector agents={agents} />
       </div>
     </div>
   );

@@ -35,6 +35,7 @@ interface SidebarProps {
   collapsed: boolean;
   onToggleCollapse: () => void;
   unreadCount: number;
+  pendingApprovalsCount?: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -43,11 +44,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
   collapsed,
   onToggleCollapse,
   unreadCount,
+  pendingApprovalsCount = 3,
 }) => {
   const workspaceItems = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
     { id: 'agents', label: 'AI Agents', icon: Bot, badge: '6' },
-    { id: 'policies', label: 'Spending Policies', icon: ShieldCheck, badge: '3' },
+    {
+      id: 'policies',
+      label: 'Spending Policies',
+      icon: ShieldCheck,
+      badge: pendingApprovalsCount > 0 ? String(pendingApprovalsCount) : undefined,
+    },
     { id: 'providers', label: 'Providers & Vendors', icon: Boxes },
     { id: 'subscriptions', label: 'Subscriptions', icon: Repeat, badge: '4' },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
