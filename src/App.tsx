@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sidebar, ScreenId } from './components/layout/Sidebar.js';
 import { TopNav } from './components/layout/TopNav.js';
 import { OverviewScreen } from './components/screens/OverviewScreen.js';
@@ -26,6 +26,25 @@ export const App: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<ScreenId>('overview');
   const [collapsedSidebar, setCollapsedSidebar] = useState(false);
   const [isCreateWizardOpen, setIsCreateWizardOpen] = useState(false);
+
+  // Black & White Theme Switcher (Dark / Light)
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    const saved = localStorage.getItem('autostream_theme');
+    return (saved === 'light' || saved === 'dark') ? saved : 'dark';
+  });
+
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('autostream_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
 
   // Core Data States
   const [agents, setAgents] = useState<Agent[]>(INITIAL_AGENTS);
@@ -64,7 +83,6 @@ export const App: React.FC = () => {
         return a;
       })
     );
-    // Add success notification
     setNotifications((prev) => [
       {
         id: `notif-${Date.now()}`,
@@ -188,7 +206,7 @@ export const App: React.FC = () => {
       };
 
       setTransactions([blockedTx, ...transactions]);
-      setSelectedTransaction(blockedTx); // Auto-open drawer to showcase enforcement
+      setSelectedTransaction(blockedTx);
       setNotifications((prev) => [
         {
           id: `notif-${Date.now()}`,
@@ -202,13 +220,12 @@ export const App: React.FC = () => {
       ]);
       setSimulationStep(2);
     } else {
-      // Reset simulation
       setSimulationStep(0);
     }
   };
 
   return (
-    <div className="min-h-screen bg-background text-slate-100 flex">
+    <div className="min-h-screen bg-background text-text-primary flex transition-colors duration-200">
       {/* Persistent Collapsible Sidebar */}
       <Sidebar
         currentScreen={currentScreen}
@@ -216,6 +233,8 @@ export const App: React.FC = () => {
         collapsed={collapsedSidebar}
         onToggleCollapse={() => setCollapsedSidebar(!collapsedSidebar)}
         unreadCount={unreadCount}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
 
       {/* Main Workspace Body */}
@@ -231,6 +250,8 @@ export const App: React.FC = () => {
           onSelectScreen={setCurrentScreen}
           unreadCount={unreadCount}
           walletBalanceUsdc={walletBalanceUsdc}
+          theme={theme}
+          onToggleTheme={toggleTheme}
         />
 
         {/* Screen Routing */}

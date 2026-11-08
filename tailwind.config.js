@@ -9,18 +9,22 @@ export default {
   theme: {
     extend: {
       colors: {
-        background: '#0B0D14',
-        card: '#12151F',
-        'card-elevated': '#171A26',
-        sidebar: '#0E1019',
-        border: 'rgba(255, 255, 255, 0.08)',
-        'border-hover': 'rgba(255, 255, 255, 0.16)',
+        background: 'var(--bg-app)',
+        card: 'var(--bg-card)',
+        'card-elevated': 'var(--bg-card-elevated)',
+        sidebar: 'var(--bg-sidebar)',
+        border: 'var(--border)',
+        'border-subtle': 'var(--border-subtle)',
+        'text-primary': 'var(--text-primary)',
+        'text-secondary': 'var(--text-secondary)',
+        'text-muted': 'var(--text-muted)',
+        'text-faint': 'var(--text-faint)',
         solana: {
           DEFAULT: '#14F195',
           purple: '#9945FF',
         },
         accent: {
-          violet: '#8B72FF',
+          violet: '#7C3AED',
           cyan: '#06B6D4',
         },
       },

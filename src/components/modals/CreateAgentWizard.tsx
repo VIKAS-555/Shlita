@@ -7,8 +7,6 @@ import {
   ArrowRight,
   ArrowLeft,
   CheckCircle2,
-  Lock,
-  Layers,
 } from 'lucide-react';
 import { Agent } from '../../types/dashboard.js';
 
@@ -83,44 +81,43 @@ export const CreateAgentWizard: React.FC<CreateAgentWizardProps> = ({
         };
         onCreateAgent(newAgent);
         onClose();
-        // Reset form
         setStep(1);
         setSigned(false);
-      }, 800);
-    }, 1200);
+      }, 700);
+    }, 1000);
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-card border border-border w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-card border border-border w-full max-w-2xl rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         {/* Wizard Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-slate-900/60">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card-elevated">
           <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 rounded-xl bg-accent-violet/20 border border-accent-violet/40 text-accent-violet flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-accent-violet/15 border border-accent-violet/30 text-accent-violet flex items-center justify-center">
               <Bot size={18} />
             </div>
             <div>
-              <h3 className="font-bold text-white text-base">Create Autonomous Agent</h3>
-              <p className="text-xs text-slate-400">Step {step} of 4</p>
+              <h3 className="font-bold text-text-primary text-base">Create Autonomous Agent</h3>
+              <p className="text-xs text-text-muted">Step {step} of 4</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-white transition">
+          <button onClick={onClose} className="p-1 rounded-lg text-text-muted hover:text-text-primary transition">
             <X size={18} />
           </button>
         </div>
 
         {/* Step Progress Indicators */}
         <div className="grid grid-cols-4 border-b border-border text-center text-xs font-mono">
-          <div className={`py-2.5 border-b-2 transition ${step === 1 ? 'border-accent-violet text-white font-bold bg-accent-violet/10' : 'border-transparent text-slate-500'}`}>
+          <div className={`py-2.5 border-b-2 transition ${step === 1 ? 'border-accent-violet text-text-primary font-bold bg-accent-violet/[0.05]' : 'border-transparent text-text-muted'}`}>
             1. Identity
           </div>
-          <div className={`py-2.5 border-b-2 transition ${step === 2 ? 'border-accent-violet text-white font-bold bg-accent-violet/10' : 'border-transparent text-slate-500'}`}>
+          <div className={`py-2.5 border-b-2 transition ${step === 2 ? 'border-accent-violet text-text-primary font-bold bg-accent-violet/[0.05]' : 'border-transparent text-text-muted'}`}>
             2. Budgets
           </div>
-          <div className={`py-2.5 border-b-2 transition ${step === 3 ? 'border-accent-violet text-white font-bold bg-accent-violet/10' : 'border-transparent text-slate-500'}`}>
+          <div className={`py-2.5 border-b-2 transition ${step === 3 ? 'border-accent-violet text-text-primary font-bold bg-accent-violet/[0.05]' : 'border-transparent text-text-muted'}`}>
             3. Providers
           </div>
-          <div className={`py-2.5 border-b-2 transition ${step === 4 ? 'border-accent-violet text-white font-bold bg-accent-violet/10' : 'border-transparent text-slate-500'}`}>
+          <div className={`py-2.5 border-b-2 transition ${step === 4 ? 'border-accent-violet text-text-primary font-bold bg-accent-violet/[0.05]' : 'border-transparent text-text-muted'}`}>
             4. Authorize
           </div>
         </div>
@@ -131,34 +128,34 @@ export const CreateAgentWizard: React.FC<CreateAgentWizardProps> = ({
           {step === 1 && (
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1">Agent Name</label>
+                <label className="text-xs font-semibold text-text-secondary block mb-1">Agent Name</label>
                 <input
                   type="text"
                   placeholder="e.g. data-research-agent-01"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-slate-900 border border-border focus:border-accent-violet rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 outline-none font-mono"
+                  className="w-full bg-card-elevated border border-border focus:border-accent-violet rounded-xl px-4 py-2.5 text-xs text-text-primary placeholder-text-muted outline-none font-mono"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1">Description & Objective</label>
+                <label className="text-xs font-semibold text-text-secondary block mb-1">Description & Objective</label>
                 <textarea
                   rows={2}
                   placeholder="What tasks does this agent perform? Which tools does it execute?"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-slate-900 border border-border focus:border-accent-violet rounded-xl px-4 py-2 text-xs text-white placeholder-slate-500 outline-none"
+                  className="w-full bg-card-elevated border border-border focus:border-accent-violet rounded-xl px-4 py-2 text-xs text-text-primary placeholder-text-muted outline-none"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">Target Environment</label>
+                  <label className="text-xs font-semibold text-text-secondary block mb-1">Target Environment</label>
                   <select
                     value={environment}
                     onChange={(e) => setEnvironment(e.target.value as any)}
-                    className="w-full bg-slate-900 border border-border rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
+                    className="w-full bg-card-elevated border border-border rounded-xl px-3 py-2 text-xs text-text-primary outline-none font-mono"
                   >
                     <option value="Production">Production</option>
                     <option value="Staging">Staging</option>
@@ -166,11 +163,11 @@ export const CreateAgentWizard: React.FC<CreateAgentWizardProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">Execution Mode</label>
+                  <label className="text-xs font-semibold text-text-secondary block mb-1">Execution Mode</label>
                   <select
                     value={mode}
                     onChange={(e) => setMode(e.target.value as any)}
-                    className="w-full bg-slate-900 border border-border rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
+                    className="w-full bg-card-elevated border border-border rounded-xl px-3 py-2 text-xs text-text-primary outline-none font-mono"
                   >
                     <option value="Runner">Runner (Autonomous loops)</option>
                     <option value="Caller">Caller (Prompt tool calls)</option>
@@ -185,41 +182,41 @@ export const CreateAgentWizard: React.FC<CreateAgentWizardProps> = ({
             <div className="space-y-4">
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">Monthly Limit ($)</label>
+                  <label className="text-xs font-semibold text-text-secondary block mb-1">Monthly Limit ($)</label>
                   <input
                     type="number"
                     value={monthlyBudget}
                     onChange={(e) => setMonthlyBudget(e.target.value)}
-                    className="w-full bg-slate-900 border border-border focus:border-accent-violet rounded-xl px-3 py-2 text-xs text-white font-mono outline-none"
+                    className="w-full bg-card-elevated border border-border focus:border-accent-violet rounded-xl px-3 py-2 text-xs text-text-primary font-mono outline-none"
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">Daily Limit ($)</label>
+                  <label className="text-xs font-semibold text-text-secondary block mb-1">Daily Limit ($)</label>
                   <input
                     type="number"
                     value={dailyBudget}
                     onChange={(e) => setDailyBudget(e.target.value)}
-                    className="w-full bg-slate-900 border border-border focus:border-accent-violet rounded-xl px-3 py-2 text-xs text-white font-mono outline-none"
+                    className="w-full bg-card-elevated border border-border focus:border-accent-violet rounded-xl px-3 py-2 text-xs text-text-primary font-mono outline-none"
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">Max Per Call ($)</label>
+                  <label className="text-xs font-semibold text-text-secondary block mb-1">Max Per Call ($)</label>
                   <input
                     type="number"
                     value={maxPerCall}
                     onChange={(e) => setMaxPerCall(e.target.value)}
-                    className="w-full bg-slate-900 border border-border focus:border-accent-violet rounded-xl px-3 py-2 text-xs text-white font-mono outline-none"
+                    className="w-full bg-card-elevated border border-border focus:border-accent-violet rounded-xl px-3 py-2 text-xs text-text-primary font-mono outline-none"
                   />
                 </div>
               </div>
 
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-border text-xs space-y-2">
-                <span className="font-semibold text-slate-200 block">Permitted Stablecoin Tokens:</span>
+              <div className="bg-card-elevated p-4 rounded-xl border border-border text-xs space-y-2">
+                <span className="font-semibold text-text-primary block">Permitted Stablecoin Tokens:</span>
                 <div className="flex gap-2">
                   <span className="bg-solana/10 text-solana border border-solana/30 px-3 py-1 rounded-lg font-mono">
                     USDC (SPL Token)
                   </span>
-                  <span className="bg-slate-800 text-slate-400 px-3 py-1 rounded-lg font-mono">
+                  <span className="bg-card text-text-muted border border-border px-3 py-1 rounded-lg font-mono">
                     USDT (Optional)
                   </span>
                 </div>
@@ -230,7 +227,7 @@ export const CreateAgentWizard: React.FC<CreateAgentWizardProps> = ({
           {/* STEP 3: PROVIDER PERMISSIONS */}
           {step === 3 && (
             <div className="space-y-3">
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-text-muted">
                 Select the external services this agent is authorized to interact with and pay:
               </p>
               <div className="grid grid-cols-2 gap-2.5 max-h-60 overflow-y-auto">
@@ -242,8 +239,8 @@ export const CreateAgentWizard: React.FC<CreateAgentWizardProps> = ({
                       onClick={() => toggleVendor(v.id)}
                       className={`p-3 rounded-xl border cursor-pointer transition text-xs ${
                         isChecked
-                          ? 'bg-accent-violet/10 border-accent-violet/40 text-white'
-                          : 'bg-slate-900 border-border text-slate-400 hover:text-slate-200'
+                          ? 'bg-accent-violet/10 border-accent-violet/40 text-text-primary'
+                          : 'bg-card-elevated border-border text-text-muted hover:text-text-primary'
                       }`}
                     >
                       <div className="flex items-center justify-between">
@@ -255,7 +252,7 @@ export const CreateAgentWizard: React.FC<CreateAgentWizardProps> = ({
                           className="accent-accent-violet"
                         />
                       </div>
-                      <span className="text-[10px] text-slate-500 font-mono block mt-1">{v.id}</span>
+                      <span className="text-[10px] text-text-faint font-mono block mt-1">{v.id}</span>
                     </div>
                   );
                 })}
@@ -266,34 +263,34 @@ export const CreateAgentWizard: React.FC<CreateAgentWizardProps> = ({
           {/* STEP 4: SOLANA AUTHORIZATION REVIEW */}
           {step === 4 && (
             <div className="space-y-4">
-              <div className="bg-slate-950 p-4 rounded-xl border border-border/80 space-y-3 text-xs font-mono">
+              <div className="bg-card-elevated p-4 rounded-xl border border-border space-y-3 text-xs font-mono">
                 <div className="flex items-center space-x-2 text-solana font-bold">
                   <ShieldCheck size={16} />
                   <span>Solana Subscriptions & Allowances Review</span>
                 </div>
-                <div className="space-y-1.5 text-slate-300">
+                <div className="space-y-1.5 text-text-secondary">
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Agent Name:</span>
-                    <span className="font-bold">{name || 'autonomous-agent'}</span>
+                    <span className="text-text-muted">Agent Name:</span>
+                    <span className="font-bold text-text-primary">{name || 'autonomous-agent'}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Allowed Per Call:</span>
-                    <span>${maxPerCall} USDC</span>
+                    <span className="text-text-muted">Allowed Per Call:</span>
+                    <span className="text-text-primary">${maxPerCall} USDC</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Daily Cap:</span>
-                    <span>${dailyBudget} USDC</span>
+                    <span className="text-text-muted">Daily Cap:</span>
+                    <span className="text-text-primary">${dailyBudget} USDC</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Authorized Vendors:</span>
-                    <span className="text-accent-violet">{selectedVendors.length} providers</span>
+                    <span className="text-text-muted">Authorized Vendors:</span>
+                    <span className="text-accent-violet font-semibold">{selectedVendors.length} providers</span>
                   </div>
                 </div>
               </div>
 
-              <div className="p-3 bg-accent-violet/10 border border-accent-violet/30 rounded-xl text-xs text-slate-200 space-y-1">
+              <div className="p-3 bg-accent-violet/10 border border-accent-violet/25 rounded-xl text-xs text-text-secondary space-y-1">
                 <span className="font-bold text-accent-violet block">Self-Custodial Guarantee:</span>
-                <p className="text-[11px] text-slate-300">
+                <p className="text-[11px] leading-relaxed">
                   AutoStream does not hold your keys. Signing will create a Program Derived Address (PDA) with
                   bounded spending rights according to the official Solana Subscriptions program.
                 </p>
@@ -303,11 +300,11 @@ export const CreateAgentWizard: React.FC<CreateAgentWizardProps> = ({
         </div>
 
         {/* Wizard Footer Controls */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-border bg-slate-900/60">
+        <div className="flex items-center justify-between px-6 py-4 border-t border-border bg-card-elevated">
           {step > 1 ? (
             <button
               onClick={() => setStep(step - 1)}
-              className="flex items-center gap-1.5 text-xs text-slate-300 hover:text-white px-3 py-2 rounded-xl transition"
+              className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary px-3 py-2 rounded-xl transition"
             >
               <ArrowLeft size={14} /> Back
             </button>
@@ -326,7 +323,7 @@ export const CreateAgentWizard: React.FC<CreateAgentWizardProps> = ({
             <button
               onClick={handleSignAndCreate}
               disabled={isSigning || signed}
-              className="flex items-center gap-2 bg-gradient-to-r from-accent-violet via-solana-purple to-solana hover:opacity-95 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-accent-violet/30 transition disabled:opacity-50"
+              className="flex items-center gap-2 bg-gradient-to-r from-accent-violet via-solana-purple to-solana hover:opacity-95 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-md transition disabled:opacity-50"
             >
               {isSigning ? (
                 <>

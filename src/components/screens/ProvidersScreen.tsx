@@ -3,11 +3,7 @@ import {
   Boxes,
   Plus,
   Search,
-  ExternalLink,
-  ShieldCheck,
   CheckCircle2,
-  Clock,
-  Zap,
 } from 'lucide-react';
 import { Provider } from '../../types/dashboard.js';
 
@@ -60,21 +56,21 @@ export const ProvidersScreen: React.FC<ProvidersScreenProps> = ({
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Approved Providers & Vendors</h2>
-          <p className="text-xs text-slate-400 mt-1">
+          <h2 className="text-xl font-bold text-text-primary tracking-tight">Approved Providers & Vendors</h2>
+          <p className="text-xs text-text-muted mt-1">
             Authorize and manage verified external API endpoints, RPC nodes, and SaaS merchants.
           </p>
         </div>
         <button
           onClick={() => setShowAddModal(true)}
-          className="flex items-center space-x-2 bg-gradient-to-r from-accent-violet to-solana-purple hover:opacity-95 text-white font-semibold text-xs px-4 py-2.5 rounded-xl shadow-lg shadow-accent-violet/20 transition cursor-pointer"
+          className="flex items-center space-x-2 bg-gradient-to-r from-accent-violet to-solana-purple hover:opacity-95 text-white font-semibold text-xs px-4 py-2.5 rounded-xl shadow-sm transition cursor-pointer"
         >
           <Plus size={16} />
           <span>Connect Provider</span>
         </button>
       </div>
 
-      {/* Category Tabs & Search Bar (Matches uploaded Integrations reference) */}
+      {/* Category Tabs & Search Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center space-x-1.5 bg-card border border-border p-1 rounded-xl text-xs font-mono overflow-x-auto">
           {categories.map((cat) => (
@@ -83,8 +79,8 @@ export const ProvidersScreen: React.FC<ProvidersScreenProps> = ({
               onClick={() => setSelectedCategory(cat)}
               className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition ${
                 selectedCategory === cat
-                  ? 'bg-accent-violet text-white font-semibold'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-accent-violet text-white font-semibold shadow-sm'
+                  : 'text-text-muted hover:text-text-primary'
               }`}
             >
               {cat}
@@ -92,42 +88,42 @@ export const ProvidersScreen: React.FC<ProvidersScreenProps> = ({
           ))}
         </div>
         <div className="relative max-w-xs w-full">
-          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted" />
           <input
             type="text"
             placeholder="Search integrations..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-card border border-border focus:border-accent-violet rounded-xl pl-9 pr-4 py-1.5 text-xs text-white placeholder-slate-500 outline-none transition"
+            className="w-full bg-card border border-border focus:border-accent-violet rounded-xl pl-9 pr-4 py-1.5 text-xs text-text-primary placeholder-text-muted outline-none transition shadow-sm"
           />
         </div>
       </div>
 
-      {/* Responsive 3-Column Provider Card Grid (Matches uploaded Image 5) */}
+      {/* Responsive 3-Column Provider Card Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {filteredProviders.map((provider) => (
           <div
             key={provider.id}
-            className="bg-card border border-border rounded-2xl p-5 glow-card space-y-4 hover:border-slate-700 transition flex flex-col justify-between"
+            className="bg-card border border-border rounded-2xl p-5 shadow-sm space-y-4 hover:border-border-hover transition flex flex-col justify-between"
           >
             <div className="space-y-3">
               <div className="flex items-start justify-between">
                 <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-xl bg-slate-900 border border-border flex items-center justify-center text-lg shadow-sm">
+                  <div className="w-10 h-10 rounded-xl bg-card-elevated border border-border flex items-center justify-center text-lg shadow-sm">
                     {provider.logo}
                   </div>
                   <div>
-                    <h3 className="font-bold text-white text-sm">{provider.name}</h3>
-                    <span className="text-[10px] text-slate-400 font-mono block">{provider.category}</span>
+                    <h3 className="font-bold text-text-primary text-sm">{provider.name}</h3>
+                    <span className="text-[10px] text-text-muted font-mono block">{provider.category}</span>
                   </div>
                 </div>
-                <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full text-[10px] font-mono">
+                <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 rounded-full text-[10px] font-mono">
                   <CheckCircle2 size={10} /> {provider.status}
                 </span>
               </div>
 
               {/* Endpoint Link */}
-              <div className="bg-slate-950 p-2.5 rounded-xl border border-border/80 text-[11px] font-mono text-slate-300 truncate">
+              <div className="bg-card-elevated p-2.5 rounded-xl border border-border text-[11px] font-mono text-text-secondary truncate">
                 {provider.endpoint}
               </div>
 
@@ -136,7 +132,7 @@ export const ProvidersScreen: React.FC<ProvidersScreenProps> = ({
                 {provider.tags.map((tag) => (
                   <span
                     key={tag}
-                    className="bg-slate-900 text-slate-400 border border-border/60 text-[9px] font-mono px-2 py-0.5 rounded-md uppercase"
+                    className="bg-card-elevated text-text-muted border border-border text-[9px] font-mono px-2 py-0.5 rounded-md uppercase"
                   >
                     {tag}
                   </span>
@@ -145,9 +141,9 @@ export const ProvidersScreen: React.FC<ProvidersScreenProps> = ({
             </div>
 
             {/* Provider Metrics Footer */}
-            <div className="pt-3 border-t border-border/80 flex items-center justify-between text-xs font-mono text-slate-400">
+            <div className="pt-3 border-t border-border/80 flex items-center justify-between text-xs font-mono text-text-muted">
               <span>{provider.connectedAgentsCount} agents connected</span>
-              <span className="font-bold text-slate-200">${provider.totalSpentUsdc.toFixed(2)} spent</span>
+              <span className="font-bold text-text-primary">${provider.totalSpentUsdc.toFixed(2)} spent</span>
             </div>
           </div>
         ))}
@@ -155,38 +151,38 @@ export const ProvidersScreen: React.FC<ProvidersScreenProps> = ({
 
       {/* Connect Provider Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-card border border-border w-full max-w-md rounded-2xl p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
-            <h3 className="font-bold text-white text-base">Connect New Provider</h3>
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-card border border-border w-full max-w-md rounded-2xl p-6 space-y-4 shadow-xl animate-in fade-in zoom-in-95">
+            <h3 className="font-bold text-text-primary text-base">Connect New Provider</h3>
 
             <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1">Provider Name</label>
+              <label className="text-xs font-semibold text-text-secondary block mb-1">Provider Name</label>
               <input
                 type="text"
                 placeholder="e.g. QuickNode IPFS Gateway"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                className="w-full bg-slate-900 border border-border rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
+                className="w-full bg-card-elevated border border-border rounded-xl px-3 py-2 text-xs text-text-primary outline-none font-mono"
               />
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1">API Endpoint / Payment Address</label>
+              <label className="text-xs font-semibold text-text-secondary block mb-1">API Endpoint / Payment Address</label>
               <input
                 type="text"
                 placeholder="https://api.example.com"
                 value={newEndpoint}
                 onChange={(e) => setNewEndpoint(e.target.value)}
-                className="w-full bg-slate-900 border border-border rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
+                className="w-full bg-card-elevated border border-border rounded-xl px-3 py-2 text-xs text-text-primary outline-none font-mono"
               />
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1">Category</label>
+              <label className="text-xs font-semibold text-text-secondary block mb-1">Category</label>
               <select
                 value={newCategory}
                 onChange={(e) => setNewCategory(e.target.value)}
-                className="w-full bg-slate-900 border border-border rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
+                className="w-full bg-card-elevated border border-border rounded-xl px-3 py-2 text-xs text-text-primary outline-none font-mono"
               >
                 <option value="RPC & Node">RPC & Node</option>
                 <option value="AI Search">AI Search</option>
@@ -198,13 +194,13 @@ export const ProvidersScreen: React.FC<ProvidersScreenProps> = ({
             <div className="flex justify-end space-x-3 pt-3 border-t border-border">
               <button
                 onClick={() => setShowAddModal(false)}
-                className="px-4 py-2 text-xs text-slate-400 hover:text-white transition"
+                className="px-4 py-2 text-xs text-text-muted hover:text-text-primary transition"
               >
                 Cancel
               </button>
               <button
                 onClick={handleCreate}
-                className="bg-accent-violet hover:bg-accent-violet/90 text-white font-semibold text-xs px-4 py-2 rounded-xl transition"
+                className="bg-accent-violet hover:bg-accent-violet/90 text-white font-semibold text-xs px-4 py-2 rounded-xl transition shadow-sm"
               >
                 Authorize Provider
               </button>

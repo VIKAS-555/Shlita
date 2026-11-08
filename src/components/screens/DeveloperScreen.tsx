@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  Code2,
   Key,
   Copy,
   Check,
@@ -8,9 +7,6 @@ import {
   EyeOff,
   Terminal,
   Send,
-  ShieldAlert,
-  Webhook,
-  ExternalLink,
 } from 'lucide-react';
 
 export const DeveloperScreen: React.FC = () => {
@@ -138,7 +134,7 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
           },
         });
       }
-    }, 600);
+    }, 500);
   };
 
   return (
@@ -146,66 +142,66 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Developer Center & API SDK</h2>
-          <p className="text-xs text-slate-400 mt-1">
+          <h2 className="text-xl font-bold text-text-primary tracking-tight">Developer Center & API SDK</h2>
+          <p className="text-xs text-text-muted mt-1">
             Integrate the AutoStream financial gateway into your autonomous agent workflows and MCP servers.
           </p>
         </div>
-        <div className="flex items-center space-x-2 text-xs font-mono bg-card border border-border px-3 py-1.5 rounded-xl">
+        <div className="flex items-center space-x-2 text-xs font-mono bg-card border border-border px-3 py-1.5 rounded-xl shadow-sm">
           <span className="w-2 h-2 rounded-full bg-solana animate-pulse"></span>
-          <span>API Environment: Production</span>
+          <span className="text-text-secondary">API Environment: Production</span>
         </div>
       </div>
 
       {/* API Key Box */}
-      <div className="bg-card border border-border rounded-2xl p-6 glow-card space-y-3">
+      <div className="bg-card border border-border rounded-2xl p-6 shadow-sm space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="font-bold text-white text-sm">Active Secret API Key</h3>
-            <p className="text-xs text-slate-400">Used by your agent runtime or proxy gateway to authenticate.</p>
+            <h3 className="font-bold text-text-primary text-sm">Active Secret API Key</h3>
+            <p className="text-xs text-text-muted">Used by your agent runtime or proxy gateway to authenticate.</p>
           </div>
           <button
             onClick={() => copyToClipboard(apiKey, true)}
-            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-border text-xs px-3 py-1.5 rounded-xl transition"
+            className="flex items-center gap-1.5 bg-card-elevated hover:bg-border text-text-primary border border-border text-xs px-3.5 py-1.5 rounded-xl transition shadow-sm"
           >
-            {copiedKey ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+            {copiedKey ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
             <span>{copiedKey ? 'Copied!' : 'Copy Key'}</span>
           </button>
         </div>
 
-        <div className="flex items-center justify-between bg-slate-950 p-3 rounded-xl border border-border text-xs font-mono">
-          <span className="text-slate-300 tracking-wider">
+        <div className="flex items-center justify-between bg-card-elevated p-3 rounded-xl border border-border text-xs font-mono">
+          <span className="text-text-secondary tracking-wider">
             {showKey ? apiKey : 'ast_live_••••••••••••••••••••••••••••••••'}
           </span>
           <button
             onClick={() => setShowKey(!showKey)}
-            className="text-slate-400 hover:text-white transition"
+            className="text-text-muted hover:text-text-primary transition"
           >
             {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
           </button>
         </div>
       </div>
 
-      {/* Theneo-Inspired Code Sandbox & Docs (Matches user Image 1) */}
+      {/* Code Sandbox & Docs */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left: Code Snippets */}
-        <div className="bg-card border border-border rounded-2xl p-6 glow-card flex flex-col justify-between">
+        <div className="bg-card border border-border rounded-2xl p-6 shadow-sm flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-border">
               <div className="flex items-center space-x-2">
                 <Terminal size={16} className="text-accent-violet" />
-                <h4 className="font-bold text-white text-sm">Agent Gateway Request</h4>
+                <h4 className="font-bold text-text-primary text-sm">Agent Gateway Request</h4>
               </div>
               <button
                 onClick={() => copyToClipboard(snippets[activeLang])}
-                className="text-xs text-slate-400 hover:text-white flex items-center gap-1 font-mono transition"
+                className="text-xs text-text-muted hover:text-text-primary flex items-center gap-1 font-mono transition"
               >
-                {copiedSnippet ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                {copiedSnippet ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
                 <span>{copiedSnippet ? 'Copied' : 'Copy'}</span>
               </button>
             </div>
 
-            {/* Language Tabs (Theneo style) */}
+            {/* Language Tabs */}
             <div className="flex space-x-2 my-4">
               {(['nodejs', 'python', 'curl', 'solana'] as const).map((lang) => (
                 <button
@@ -213,8 +209,8 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
                   onClick={() => setActiveLang(lang)}
                   className={`px-3 py-1 rounded-lg text-xs font-mono uppercase transition ${
                     activeLang === lang
-                      ? 'bg-accent-violet text-white font-bold'
-                      : 'bg-slate-900 text-slate-400 hover:text-white'
+                      ? 'bg-accent-violet text-white font-bold shadow-sm'
+                      : 'bg-card-elevated text-text-muted hover:text-text-primary'
                   }`}
                 >
                   {lang}
@@ -223,30 +219,30 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
             </div>
 
             {/* Code Block */}
-            <pre className="bg-slate-950 p-4 rounded-xl border border-border text-[11px] font-mono text-slate-300 overflow-x-auto leading-relaxed">
+            <pre className="bg-[#0B0D14] text-[#E6EDF3] p-4 rounded-xl border border-border text-[11px] font-mono overflow-x-auto leading-relaxed">
               <code>{snippets[activeLang]}</code>
             </pre>
           </div>
 
-          <p className="text-[11px] text-slate-400 mt-4 font-mono">
+          <p className="text-[11px] text-text-muted mt-4 font-mono">
             Requires Node.js 18+ or Python 3.9+. Supports TypeScript native ESM types.
           </p>
         </div>
 
         {/* Right: Live Interactive Sandbox Tester */}
-        <div className="bg-card border border-border rounded-2xl p-6 glow-card space-y-4">
+        <div className="bg-card border border-border rounded-2xl p-6 shadow-sm space-y-4">
           <div className="pb-3 border-b border-border">
-            <h4 className="font-bold text-white text-sm">Interactive Policy Gateway Sandbox</h4>
-            <p className="text-xs text-slate-400">Trigger live simulated tool requests to test enforcement rules</p>
+            <h4 className="font-bold text-text-primary text-sm">Interactive Policy Gateway Sandbox</h4>
+            <p className="text-xs text-text-muted">Trigger live simulated tool requests to test enforcement rules</p>
           </div>
 
           <div className="space-y-3 text-xs font-mono">
             <div>
-              <label className="text-slate-400 block mb-1">CALLING AGENT</label>
+              <label className="text-text-muted block mb-1">CALLING AGENT</label>
               <select
                 value={sandboxAgent}
                 onChange={(e) => setSandboxAgent(e.target.value)}
-                className="w-full bg-slate-950 border border-border rounded-xl px-3 py-2 text-white outline-none"
+                className="w-full bg-card-elevated border border-border rounded-xl px-3 py-2 text-text-primary outline-none"
               >
                 <option value="agent-researcher-01">research-agent-01 (Cap: $0.05 / call)</option>
                 <option value="agent-dev-prod">dev-agent-prod (Cap: $20.00 / call)</option>
@@ -254,11 +250,11 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
             </div>
 
             <div>
-              <label className="text-slate-400 block mb-1">TARGET VENDOR</label>
+              <label className="text-text-muted block mb-1">TARGET VENDOR</label>
               <select
                 value={sandboxVendor}
                 onChange={(e) => setSandboxVendor(e.target.value)}
-                className="w-full bg-slate-950 border border-border rounded-xl px-3 py-2 text-white outline-none"
+                className="w-full bg-card-elevated border border-border rounded-xl px-3 py-2 text-text-primary outline-none"
               >
                 <option value="api.helius.xyz">api.helius.xyz (Whitelisted)</option>
                 <option value="api.tavily.com">api.tavily.com (Whitelisted)</option>
@@ -267,20 +263,20 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
             </div>
 
             <div>
-              <label className="text-slate-400 block mb-1">ESTIMATED COST ($ USDC)</label>
+              <label className="text-text-muted block mb-1">ESTIMATED COST ($ USDC)</label>
               <input
                 type="number"
                 step="0.01"
                 value={sandboxAmount}
                 onChange={(e) => setSandboxAmount(e.target.value)}
-                className="w-full bg-slate-950 border border-border rounded-xl px-3 py-2 text-white outline-none"
+                className="w-full bg-card-elevated border border-border rounded-xl px-3 py-2 text-text-primary outline-none"
               />
             </div>
 
             <button
               onClick={handleRunSandbox}
               disabled={isRunningSandbox}
-              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-accent-violet to-solana-purple hover:opacity-95 text-white font-bold text-xs py-2.5 rounded-xl transition cursor-pointer"
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-accent-violet to-solana-purple hover:opacity-95 text-white font-bold text-xs py-2.5 rounded-xl transition cursor-pointer shadow-sm"
             >
               <Send size={14} />
               <span>{isRunningSandbox ? 'Evaluating Policy...' : 'Send Gateway Request'}</span>
@@ -290,12 +286,12 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
           {/* Sandbox Response Terminal */}
           {sandboxResponse && (
             <div className="space-y-1">
-              <span className="text-[10px] font-mono text-slate-400 uppercase">Perimeter Response:</span>
+              <span className="text-[10px] font-mono text-text-muted uppercase">Perimeter Response:</span>
               <pre
                 className={`p-3 rounded-xl border text-[11px] font-mono overflow-x-auto ${
                   sandboxResponse.status === 200
-                    ? 'bg-emerald-950/20 border-emerald-500/30 text-emerald-300'
-                    : 'bg-red-950/20 border-red-500/30 text-red-300'
+                    ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400'
+                    : 'bg-red-500/10 border-red-500/25 text-red-500'
                 }`}
               >
                 <code>{JSON.stringify(sandboxResponse, null, 2)}</code>

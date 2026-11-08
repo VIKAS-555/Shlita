@@ -26,14 +26,14 @@ export const SettingsScreen: React.FC = () => {
     <div className="space-y-6 max-w-4xl">
       {/* Header */}
       <div className="pb-4 border-b border-border">
-        <h2 className="text-xl font-bold text-white tracking-tight">Settings & Security Governance</h2>
-        <p className="text-xs text-slate-400 mt-1">
+        <h2 className="text-xl font-bold text-text-primary tracking-tight">Settings & Security Governance</h2>
+        <p className="text-xs text-text-muted mt-1">
           Manage workspace access, on-chain Solana RPC endpoints, and autonomous agent kill-switches.
         </p>
       </div>
 
       {savedSuccess && (
-        <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs flex items-center gap-2 font-mono">
+        <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 rounded-xl text-xs flex items-center gap-2 font-mono">
           <CheckCircle2 size={16} />
           <span>Security preferences updated and synchronized on-chain.</span>
         </div>
@@ -41,7 +41,7 @@ export const SettingsScreen: React.FC = () => {
 
       {/* Security Policies Box */}
       <div className="bg-card border border-border rounded-2xl p-6 glow-card space-y-4">
-        <h3 className="font-bold text-white text-sm flex items-center gap-2">
+        <h3 className="font-bold text-text-primary text-sm flex items-center gap-2">
           <ShieldAlert size={16} className="text-accent-violet" />
           <span>Circuit Breaker & Anomaly Defenses</span>
         </h3>
@@ -49,8 +49,8 @@ export const SettingsScreen: React.FC = () => {
         <div className="space-y-3 divide-y divide-border/60 text-xs">
           <div className="flex items-center justify-between pt-2">
             <div>
-              <span className="font-bold text-white block">Auto-Freeze Agent on Rate Anomaly</span>
-              <span className="text-slate-400 text-[11px]">
+              <span className="font-bold text-text-primary block">Auto-Freeze Agent on Rate Anomaly</span>
+              <span className="text-text-muted text-[11px]">
                 Immediately suspend an agent if it fires more than its configured call frequency limit within 60 seconds.
               </span>
             </div>
@@ -64,8 +64,8 @@ export const SettingsScreen: React.FC = () => {
 
           <div className="flex items-center justify-between pt-3">
             <div>
-              <span className="font-bold text-white block">Enforce Multi-Sig for Withdrawals &gt; $1,000 USDC</span>
-              <span className="text-slate-400 text-[11px]">
+              <span className="font-bold text-text-primary block">Enforce Multi-Sig for Withdrawals &gt; $1,000 USDC</span>
+              <span className="text-text-muted text-[11px]">
                 Require Squads multi-sig co-signature before modifying top-level treasury allowance vaults.
               </span>
             </div>
@@ -81,28 +81,28 @@ export const SettingsScreen: React.FC = () => {
 
       {/* Solana Network & RPC Configuration */}
       <div className="bg-card border border-border rounded-2xl p-6 glow-card space-y-4">
-        <h3 className="font-bold text-white text-sm flex items-center gap-2">
+        <h3 className="font-bold text-text-primary text-sm flex items-center gap-2">
           <Globe size={16} className="text-solana" />
           <span>Solana Node & Cluster Connection</span>
         </h3>
 
         <div className="space-y-3 text-xs font-mono">
           <div>
-            <label className="text-slate-400 block mb-1">PRIMARY RPC ENDPOINT</label>
+            <label className="text-text-muted block mb-1">PRIMARY RPC ENDPOINT</label>
             <input
               type="text"
               value={selectedRpc}
               onChange={(e) => setSelectedRpc(e.target.value)}
-              className="w-full bg-slate-950 border border-border rounded-xl px-3 py-2 text-white outline-none"
+              className="w-full bg-card-elevated border border-border rounded-xl px-3 py-2 text-text-primary outline-none"
             />
           </div>
           <div>
-            <label className="text-slate-400 block mb-1">SOLANA PROGRAM ID (ALLOWANCE VAULT)</label>
+            <label className="text-text-muted block mb-1">SOLANA PROGRAM ID (ALLOWANCE VAULT)</label>
             <input
               type="text"
               disabled
               value="SubScr1pt1ons11111111111111111111111111111111"
-              className="w-full bg-slate-900 border border-border text-slate-500 rounded-xl px-3 py-2 outline-none cursor-not-allowed"
+              className="w-full bg-card-elevated border border-border text-text-faint rounded-xl px-3 py-2 outline-none cursor-not-allowed"
             />
           </div>
         </div>
@@ -110,28 +110,28 @@ export const SettingsScreen: React.FC = () => {
 
       {/* Organization Members */}
       <div className="bg-card border border-border rounded-2xl p-6 glow-card space-y-4">
-        <h3 className="font-bold text-white text-sm flex items-center gap-2">
+        <h3 className="font-bold text-text-primary text-sm flex items-center gap-2">
           <Users size={16} className="text-cyan-400" />
           <span>Team Roles & Authorities</span>
         </h3>
 
         <div className="space-y-2 text-xs font-mono">
-          <div className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-border">
+          <div className="flex items-center justify-between p-3 bg-card-elevated rounded-xl border border-border">
             <div>
-              <span className="font-bold text-white block">Arnav Patel (XiaoArnav)</span>
-              <span className="text-slate-400 text-[10px]">322868724+XiaoArnav@users.noreply.github.com</span>
+              <span className="font-bold text-text-primary block">Arnav Patel (XiaoArnav)</span>
+              <span className="text-text-muted text-[10px]">322868724+XiaoArnav@users.noreply.github.com</span>
             </div>
             <span className="bg-accent-violet/20 text-accent-violet px-2 py-0.5 rounded text-[10px] font-bold">
               OWNER / SIGNER
             </span>
           </div>
 
-          <div className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-border">
+          <div className="flex items-center justify-between p-3 bg-card-elevated rounded-xl border border-border">
             <div>
-              <span className="font-bold text-white block">Jesse (Lead DevOps)</span>
-              <span className="text-slate-400 text-[10px]">jesse@r1vs.com</span>
+              <span className="font-bold text-text-primary block">Jesse (Lead DevOps)</span>
+              <span className="text-text-muted text-[10px]">jesse@r1vs.com</span>
             </div>
-            <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded text-[10px]">
+            <span className="bg-border text-text-secondary px-2 py-0.5 rounded text-[10px]">
               OPERATOR
             </span>
           </div>

@@ -14,7 +14,8 @@ import {
   ChevronDown,
   ChevronsLeft,
   ChevronsRight,
-  ShieldAlert,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 export type ScreenId =
@@ -36,6 +37,8 @@ interface SidebarProps {
   collapsed: boolean;
   onToggleCollapse: () => void;
   unreadCount: number;
+  theme: 'dark' | 'light';
+  onToggleTheme: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -44,6 +47,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   collapsed,
   onToggleCollapse,
   unreadCount,
+  theme,
+  onToggleTheme,
 }) => {
   const workspaceItems = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -73,49 +78,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
     >
       {/* Brand Header */}
       <div className="h-16 flex items-center justify-between px-4 border-b border-border">
-        <div className="flex items-center space-x-3 overflow-hidden cursor-pointer" onClick={() => onSelectScreen('overview')}>
-          <div className="h-10 w-10 min-w-10 rounded-xl bg-gradient-to-tr from-accent-violet to-solana flex items-center justify-center font-bold text-black text-xl shadow-lg shadow-accent-violet/20">
+        <div
+          className="flex items-center space-x-3 overflow-hidden cursor-pointer"
+          onClick={() => onSelectScreen('overview')}
+        >
+          <div className="h-9 w-9 min-w-9 rounded-xl bg-gradient-to-tr from-accent-violet to-solana flex items-center justify-center font-bold text-white text-lg shadow-sm">
             ש
           </div>
           {!collapsed && (
             <div className="truncate">
-              <span className="font-extrabold text-base tracking-tight text-white block">AutoStream</span>
+              <span className="font-bold text-sm tracking-tight text-text-primary block">AutoStream</span>
               <span className="text-[10px] text-accent-violet font-mono tracking-wider block uppercase">Agent Banking</span>
             </div>
           )}
         </div>
         <button
           onClick={onToggleCollapse}
-          className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+          className="text-text-muted hover:text-text-primary p-1 rounded-lg hover:bg-card-elevated transition"
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          {collapsed ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
+          {collapsed ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
         </button>
       </div>
 
       {/* Workspace Switcher */}
       {!collapsed && (
         <div className="p-3 border-b border-border/60">
-          <div className="flex items-center justify-between bg-card hover:bg-card-elevated border border-border/80 px-3 py-2 rounded-xl text-xs cursor-pointer transition">
+          <div className="flex items-center justify-between bg-card-elevated hover:bg-border/60 border border-border px-3 py-2 rounded-xl text-xs cursor-pointer transition">
             <div className="flex items-center space-x-2.5 truncate">
               <div className="w-2 h-2 rounded-full bg-solana animate-pulse"></div>
-              <span className="font-semibold text-slate-200 truncate">TRioN Labs / Prod</span>
+              <span className="font-semibold text-text-secondary truncate">TRioN Labs / Prod</span>
             </div>
-            <ChevronDown size={14} className="text-slate-400" />
+            <ChevronDown size={14} className="text-text-muted" />
           </div>
         </div>
       )}
 
       {/* Navigation List */}
-      <div className="flex-1 overflow-y-auto py-4 px-3 space-y-6">
+      <div className="flex-1 overflow-y-auto py-3 px-3 space-y-5">
         {/* Workspace Section */}
         <div>
           {!collapsed && (
-            <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <div className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-text-faint font-mono">
               Workspace
             </div>
           )}
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {workspaceItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentScreen === item.id;
@@ -126,18 +134,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   title={collapsed ? item.label : undefined}
                   className={`w-full flex items-center ${
                     collapsed ? 'justify-center px-0' : 'justify-between px-3'
-                  } py-2 rounded-xl text-xs font-medium transition-all ${
+                  } py-2 rounded-xl text-xs font-medium transition-colors ${
                     isActive
-                      ? 'bg-accent-violet/15 text-accent-violet border border-accent-violet/30 shadow-sm'
-                      : 'text-slate-300 hover:bg-slate-850 hover:text-white'
+                      ? 'bg-accent-violet/10 text-accent-violet font-semibold border border-accent-violet/20'
+                      : 'text-text-secondary hover:bg-card-elevated hover:text-text-primary'
                   }`}
                 >
                   <div className="flex items-center space-x-3">
-                    <Icon size={18} className={isActive ? 'text-accent-violet' : 'text-slate-400'} />
+                    <Icon size={16} className={isActive ? 'text-accent-violet' : 'text-text-muted'} />
                     {!collapsed && <span>{item.label}</span>}
                   </div>
                   {!collapsed && item.badge && (
-                    <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded-full font-mono">
+                    <span className="text-[10px] bg-card-elevated text-text-muted px-1.5 py-0.5 rounded-full font-mono border border-border">
                       {item.badge}
                     </span>
                   )}
@@ -150,11 +158,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Developers Section */}
         <div>
           {!collapsed && (
-            <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <div className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-text-faint font-mono">
               Developers
             </div>
           )}
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {developerItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentScreen === item.id;
@@ -165,13 +173,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   title={collapsed ? item.label : undefined}
                   className={`w-full flex items-center ${
                     collapsed ? 'justify-center px-0' : 'justify-start px-3'
-                  } py-2 rounded-xl text-xs font-medium transition-all ${
+                  } py-2 rounded-xl text-xs font-medium transition-colors ${
                     isActive
-                      ? 'bg-accent-violet/15 text-accent-violet border border-accent-violet/30 shadow-sm'
-                      : 'text-slate-300 hover:bg-slate-850 hover:text-white'
+                      ? 'bg-accent-violet/10 text-accent-violet font-semibold border border-accent-violet/20'
+                      : 'text-text-secondary hover:bg-card-elevated hover:text-text-primary'
                   }`}
                 >
-                  <Icon size={18} className={isActive ? 'text-accent-violet' : 'text-slate-400'} />
+                  <Icon size={16} className={isActive ? 'text-accent-violet' : 'text-text-muted'} />
                   {!collapsed && <span className="ml-3">{item.label}</span>}
                 </button>
               );
@@ -182,11 +190,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Management Section */}
         <div>
           {!collapsed && (
-            <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <div className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-text-faint font-mono">
               Management
             </div>
           )}
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {managementItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentScreen === item.id;
@@ -197,18 +205,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   title={collapsed ? item.label : undefined}
                   className={`w-full flex items-center ${
                     collapsed ? 'justify-center px-0' : 'justify-between px-3'
-                  } py-2 rounded-xl text-xs font-medium transition-all ${
+                  } py-2 rounded-xl text-xs font-medium transition-colors ${
                     isActive
-                      ? 'bg-accent-violet/15 text-accent-violet border border-accent-violet/30 shadow-sm'
-                      : 'text-slate-300 hover:bg-slate-850 hover:text-white'
+                      ? 'bg-accent-violet/10 text-accent-violet font-semibold border border-accent-violet/20'
+                      : 'text-text-secondary hover:bg-card-elevated hover:text-text-primary'
                   }`}
                 >
                   <div className="flex items-center space-x-3">
-                    <Icon size={18} className={isActive ? 'text-accent-violet' : 'text-slate-400'} />
+                    <Icon size={16} className={isActive ? 'text-accent-violet' : 'text-text-muted'} />
                     {!collapsed && <span>{item.label}</span>}
                   </div>
                   {!collapsed && (item.count ?? 0) > 0 && (
-                    <span className="text-[10px] bg-red-500/20 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded-full font-mono font-bold">
+                    <span className="text-[10px] bg-red-500/15 text-red-500 border border-red-500/20 px-1.5 py-0.5 rounded-full font-mono font-bold">
                       {item.count}
                     </span>
                   )}
@@ -219,23 +227,43 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* User Profile Card */}
-      <div className="p-3 border-t border-border">
+      {/* Theme Switch & User Profile */}
+      <div className="p-3 border-t border-border space-y-2">
+        {/* Black & White Theme Switcher Button (ExpenseVista style) */}
+        <button
+          onClick={onToggleTheme}
+          className={`w-full flex items-center ${
+            collapsed ? 'justify-center' : 'justify-between px-3'
+          } py-1.5 rounded-xl text-xs font-medium bg-card-elevated border border-border text-text-secondary hover:text-text-primary hover:border-border-hover transition`}
+          title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+        >
+          <div className="flex items-center space-x-2">
+            {theme === 'dark' ? <Sun size={14} className="text-amber-400" /> : <Moon size={14} className="text-accent-violet" />}
+            {!collapsed && <span>{theme === 'dark' ? 'Switch to light' : 'Switch to dark'}</span>}
+          </div>
+          {!collapsed && (
+            <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded bg-card text-text-muted border border-border">
+              {theme}
+            </span>
+          )}
+        </button>
+
+        {/* Profile Card */}
         <div
           className={`flex items-center ${
             collapsed ? 'justify-center' : 'space-x-3'
-          } p-2 rounded-xl hover:bg-card cursor-pointer transition`}
+          } p-1.5 rounded-xl hover:bg-card-elevated cursor-pointer transition`}
         >
           <div className="relative">
-            <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-accent-violet to-solana-purple flex items-center justify-center font-bold text-white text-xs shadow-md">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-accent-violet to-solana flex items-center justify-center font-bold text-white text-xs shadow-sm">
               AP
             </div>
-            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-solana ring-2 ring-sidebar"></span>
+            <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-solana ring-2 ring-sidebar"></span>
           </div>
           {!collapsed && (
             <div className="truncate text-left">
-              <span className="text-xs font-semibold text-white block truncate">Arnav Patel</span>
-              <span className="text-[10px] text-slate-400 font-mono block truncate">AuSt...9R8K (Admin)</span>
+              <span className="text-xs font-semibold text-text-primary block truncate">Arnav Patel</span>
+              <span className="text-[10px] text-text-muted font-mono block truncate">AuSt...9R8K (Admin)</span>
             </div>
           )}
         </div>
