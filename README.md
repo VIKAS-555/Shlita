@@ -2,12 +2,14 @@
 
 > **Autonomous AI Agent Financial Control Plane & Policy Proxy on Solana Rails.**
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-xiaoarnav.github.io%2FShlita-14F195?style=for-the-badge&logo=googlechrome&logoColor=white)](https://xiaoarnav.github.io/Shlita/)
+[![Live Demo (Vercel)](https://img.shields.io/badge/Vercel-shlita.vercel.app-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://shlita.vercel.app/)
+[![Live Demo (GitHub Pages)](https://img.shields.io/badge/GitHub%20Pages-xiaoarnav.github.io%2FShlita-14F195?style=for-the-badge&logo=googlechrome&logoColor=white)](https://xiaoarnav.github.io/Shlita/)
 [![Solana](https://img.shields.io/badge/Solana-Pay%20%26%20Subscriptions-14F195?logo=solana)](https://solana.com)
 [![GitHub Repo](https://img.shields.io/badge/GitHub-XiaoArnav%2FShlita-7C3AED?logo=github)](https://github.com/XiaoArnav/Shlita)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**🌐 Live Production App**: [https://xiaoarnav.github.io/Shlita/](https://xiaoarnav.github.io/Shlita/)
+- ⚡ **Primary High-Speed Live App (Vercel)**: [https://shlita.vercel.app/](https://shlita.vercel.app/)
+- 🌐 **GitHub Pages Mirror**: [https://xiaoarnav.github.io/Shlita/](https://xiaoarnav.github.io/Shlita/)
 
 ---
 
