@@ -83,12 +83,12 @@ export const SolanaArchitectureFlow: React.FC<SolanaArchitectureFlowProps> = ({
       title: 'Solana Subscriptions Authority PDA',
       subtitle: '@solana/subscriptions Program Derived Address',
       spec: [
-        'Seeds: ["subscription_authority", subscriber_pubkey, merchant_pubkey]',
-        'Canonical Bump: 254 (SubScr1pt1ons11111111111111111111111111111111)',
+        'Seeds: ["SubscriptionAuthority", user, token_mint]',
+        'Canonical Program ID: De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44',
         'Cryptographic Guarantee: Merchant can only claim within non-custodial cap',
         'Zero delegate collisions on SPL Token accounts',
       ],
-      solanaAddress: '7xKqWb9Z...subscriptions_authority',
+      solanaAddress: 'De1egAF...subscriptions_authority',
     },
     merchant: {
       title: 'Merchant Associated Token Account (ATA)',

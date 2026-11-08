@@ -202,4 +202,30 @@ describe('Shlita Gateway HTTP Seam', () => {
     const portData = await portRes.json();
     expect(portData.reason).toBe('SSRF_SECURITY_VIOLATION');
   });
+
+  it('ShlitaClient SDK connects, sets auth headers, and proxies requests', async () => {
+    const { ShlitaClient } = await import('../packages/core/src/client.js');
+    const { serve } = await import('@hono/node-server');
+    const server = serve({ fetch: app.fetch, port: 4099 });
+
+    try {
+      const client = new ShlitaClient({
+        apiKey: 'shlt_live_sentinel_key',
+        baseUrl: 'http://localhost:4099',
+      });
+
+      const response = await client.proxy({
+        agentId: 'agent-sentinel-01',
+        vendor: 'api.helius.xyz',
+        path: '/v0/token-metadata',
+        body: { mints: ['test'] },
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.decision).toBe('ALLOWED');
+      expect(response.data.success).toBe(true);
+    } finally {
+      server.close();
+    }
+  });
 });

@@ -2,11 +2,11 @@
 
 > **Autonomous AI Agent Financial Control Plane & Policy Proxy on Solana Rails.**
 
-[![Live Demo (Vercel)](https://img.shields.io/badge/Vercel-shlita.vercel.app-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://shlita.vercel.app/)
-[![Live Demo (GitHub Pages)](https://img.shields.io/badge/GitHub%20Pages-xiaoarnav.github.io%2FShlita-14F195?style=for-the-badge&logo=googlechrome&logoColor=white)](https://xiaoarnav.github.io/Shlita/)
-[![Solana](https://img.shields.io/badge/Solana-Pay%20%26%20Subscriptions-14F195?logo=solana)](https://solana.com)
-[![GitHub Repo](https://img.shields.io/badge/GitHub-XiaoArnav%2FShlita-7C3AED?logo=github)](https://github.com/XiaoArnav/Shlita)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Vercel](https://img.shields.io/badge/Vercel-shlita.vercel.app-000000?style=flat-square&logo=vercel&logoColor=white)](https://shlita.vercel.app/)
+[![GitHub Pages](https://img.shields.io/badge/Mirror-xiaoarnav.github.io%2FShlita-14F195?style=flat-square&logo=googlechrome&logoColor=white)](https://xiaoarnav.github.io/Shlita/)
+[![Solana Subscriptions](https://img.shields.io/badge/Solana-Subscriptions%20PDA-7C3AED?style=flat-square&logo=solana)](https://solana.com)
+[![Tests](https://img.shields.io/badge/Tests-25%20Passing-success?style=flat-square)](tests)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
 - ⚡ **Primary Live Application (Vercel Edge)**: [https://shlita.vercel.app/](https://shlita.vercel.app/)
 - 🌐 **Backup Live Mirror (GitHub Pages)**: [https://xiaoarnav.github.io/Shlita/](https://xiaoarnav.github.io/Shlita/)
@@ -21,10 +21,11 @@ Autonomous AI agents (trading bots, research agents, code reviewers, DevOps resp
 - **Solana RPCs**: Helius, QuickNode, Triton
 - **Web Search & Data**: Tavily, Exa, Brave Search
 
-Giving an autonomous AI agent raw wallet private keys or unlimited credit cards is financial suicide:
+Giving an autonomous AI agent raw wallet private keys or unlimited corporate cards is financial suicide:
 - **Prompt Injection & Phishing**: Adversaries trick agents into transacting with malicious drainer endpoints.
-- **Recursive Hallucination Loops**: Bugs or tool-use loops can trigger thousands of calls per minute, draining thousands of dollars in minutes.
-- **Manual Approvals Kill Autonomy**: Requiring human sign-off on every $0.02 micro-transaction makes autonomous agent workflows impossible.
+- **Recursive Hallucination Loops**: Tool-use loops trigger thousands of calls per minute, draining budgets in seconds.
+- **Concurrency Race Conditions**: Parallel subagents spend the same balance simultaneously, breaking periodic budgets.
+- **Manual Approvals Kill Autonomy**: Requiring human sign-off on every $0.02 micro-transaction renders agents useless.
 
 ---
 
@@ -32,19 +33,19 @@ Giving an autonomous AI agent raw wallet private keys or unlimited credit cards 
 
 **Shlita** (Hebrew for *"Governance & Control"*) is an inline financial policy proxy and operator control plane that enforces deterministic boundaries on AI agent spending before on-chain settlement on Solana:
 
-- 🛡️ **Sub-Millisecond Policy Checks**: Intercepts requests and enforces per-call spending caps (e.g. $0.05 max per call).
-- 🔒 **Atomic Budget Reservations**: Concurrency-safe two-phase commit reservation protocol (`evaluateAndReserve` ➔ `commitReservation` / `rollbackReservation`) backed by a durable SQLite ledger to eliminate race-condition overspending under parallel bursts.
-- 💳 **Server-Owned Tariffs & Transparent Costing**: Never trusts client-reported estimates as authoritative spend; uses server-owned provider tariffs (`helius`, `tavily`) and reconciles actual billable usage.
+- 🛡️ **Sub-Millisecond Policy Checks**: Intercepts requests and enforces per-call spending caps (<$0.05 max per call).
+- 🔒 **Atomic Budget Reservations**: Concurrency-safe two-phase commit reservation protocol (`evaluateAndReserve` ➔ `commitReservation` / `rollbackReservation`) backed by a durable ACID SQLite ledger to eliminate race-condition overspending under parallel bursts.
+- 💳 **Server-Owned Tariffs**: Reconciles authoritative provider tariffs (`helius`, `tavily`) rather than trusting client-reported costs.
 - 🔄 **Periodic Budget Rollovers**: Hard periodic limits (daily/monthly caps in USDC base units) with automatic period rollovers.
 - 🌐 **Vendor Whitelisting & SSRF Firewall**: Restricts agents to verified domains (`api.helius.xyz`, `api.tavily.com`) and strictly blocks SSRF attacks (loopback, RFC 1918 private subnets, cloud metadata `169.254.169.254`, userinfo URLs, and non-443 ports).
 - ⚡ **Rolling Anomaly Circuit Breaker**: Detects high-frequency call bursts (>6 calls/min) or error cascades and automatically freezes the agent.
 - ⛓️ **Canonical Solana Subscriptions Protocol**: Directly integrates official Solana Subscriptions program (`De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44`) with deterministic `SubscriptionAuthority` PDAs (`['SubscriptionAuthority', user, mint]`), `FixedDelegation` PDAs, and honest pending/confirmed settlement states.
-- 🔑 **Agent API Authentication & Credential Boundary**: Dedicated agent API keys with hashed key storage; server-held vendor credentials are injected server-side and agent bearer tokens are never forwarded upstream.
-- 🎨 **Enterprise Command Center**: Beautiful dark/light theme dashboard with real-time budget utilization rings, live gateway daemon status indicator (`Gateway Live (:4000)`), telemetry, and 1-click circuit reset.
+- 🔑 **Agent Credential Boundary**: Dedicated agent API keys with hashed key storage; upstream vendor secrets are injected server-side and never exposed to the agent runtime.
+- 🎨 **Enterprise Command Center**: Dark/light theme dashboard with real-time budget utilization rings, live gateway daemon status indicator (`Gateway Live (:4000)`), telemetry, and 1-click circuit reset.
 
 ---
 
-## 3. Architecture & Honest Request Lifecycle
+## 3. Architecture & Request Lifecycle
 
 ```
 ┌─────────────────────┐
@@ -97,15 +98,15 @@ Shlita enforces strict truth-in-advertising for all transaction states:
 ```
 shlita/
 ├── packages/
-│   ├── core/                  # Deterministic Policy Engine & Durable SQLite Ledger (ACID transactions)
+│   ├── core/                  # Deterministic Policy Engine, ShlitaClient SDK & Durable SQLite Ledger
 │   ├── gateway/               # Hono HTTP API Gateway (/v1/proxy, /v1/agents, audit logs, SSRF guard)
 │   └── solana/                # Canonical Solana Subscriptions Protocol (Program De1egAF...vR44)
 ├── src/                       # React 18 + Vite + Tailwind v4 + Recharts UI Dashboard
 ├── demo/
 │   └── run-demo.ts            # Terminal attack & circuit breaker simulation
-├── tests/                     # 24 Unit & Integration Tests (Vitest)
+├── tests/                     # 25 Unit & Integration Tests (Vitest)
 │   ├── core.test.ts           # 12 Core ledger, concurrency, and policy invariant tests
-│   ├── gateway.test.ts        # 7 Gateway, SSRF firewall, and authentication tests
+│   ├── gateway.test.ts        # 8 Gateway, SSRF firewall, SDK and authentication tests
 │   └── solana.test.ts         # 5 Canonical Solana Subscriptions protocol and honest state tests
 ├── GLOSSARY.md                # Ubiquitous domain language
 └── docs/adr/                  # Architectural Decision Records (ADR 0001)
@@ -130,7 +131,7 @@ npm install
 ```bash
 npm test
 ```
-All **24 unit and integration tests** will execute against core invariants, atomic budget reservations, gateway SSRF proxies, and canonical Solana Subscriptions settlement seams.
+All **25 unit and integration tests** execute against core invariants, atomic budget reservations, gateway SSRF proxies, client SDK, and canonical Solana Subscriptions settlement seams.
 
 ### Run Attack Simulation
 ```bash
@@ -151,16 +152,16 @@ Open [http://localhost:4000](http://localhost:4000) to view the live dashboard.
 
 ### Node.js / TypeScript
 ```typescript
-import { ShlitaClient } from '@shlita/sdk';
+import { ShlitaClient } from 'shlita';
 
 const client = new ShlitaClient({
-  apiKey: process.env.SHLITA_API_KEY, // e.g. shlt_live_researcher_dev_01
+  apiKey: process.env.SHLITA_API_KEY, // e.g. shlt_live_sentinel_dev_01
   baseUrl: 'http://localhost:4000',
 });
 
 // Outbound paid tool invocation protected by Shlita perimeter
 const response = await client.proxy({
-  agentId: 'agent-researcher-01',
+  agentId: 'agent-sentinel-01',
   vendor: 'api.helius.xyz',
   method: 'POST',
   path: '/v0/addresses/USDC/balances',
@@ -173,10 +174,10 @@ console.log('Policy Approved & Forwarded:', response.data);
 ### cURL
 ```bash
 curl -X POST http://localhost:4000/v1/proxy \
-  -H "x-shlita-api-key: shlt_live_researcher_dev_01" \
+  -H "x-shlita-api-key: shlt_live_sentinel_dev_01" \
   -H "Content-Type: application/json" \
   -d '{
-    "agentId": "agent-researcher-01",
+    "agentId": "agent-sentinel-01",
     "vendor": "api.helius.xyz",
     "path": "/v0/addresses/USDC/balances",
     "body": { "address": "..." }
