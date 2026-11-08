@@ -12,6 +12,8 @@ import { DeveloperScreen } from './components/screens/DeveloperScreen.js';
 import { NotificationsScreen } from './components/screens/NotificationsScreen.js';
 import { SettingsScreen } from './components/screens/SettingsScreen.js';
 import { CreateAgentWizard } from './components/modals/CreateAgentWizard.js';
+import { AttackSimulatorModal, SimulatorExecutionResult } from './components/simulator/AttackSimulatorModal.js';
+import { CommandPalette } from './components/palette/CommandPalette.js';
 import {
   INITIAL_AGENTS,
   INITIAL_NOTIFICATIONS,
@@ -26,6 +28,23 @@ export const App: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<ScreenId>('overview');
   const [collapsedSidebar, setCollapsedSidebar] = useState(false);
   const [isCreateWizardOpen, setIsCreateWizardOpen] = useState(false);
+  const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+
+  // Global Keyboard Shortcuts (Cmd+K for Command Palette, Cmd+P for Simulator)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen((prev) => !prev);
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        setIsSimulatorOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Black & White Theme Switcher (Dark / Light)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -224,6 +243,157 @@ export const App: React.FC = () => {
     }
   };
 
+  // --- ATTACK SIMULATOR & PLAYGROUND HANDLER ---
+  const handleApplySimulationResult = (result: SimulatorExecutionResult) => {
+    const targetAgent = agents.find((a) => a.id === result.agentId);
+    const agentName = targetAgent ? targetAgent.name : result.agentId;
+
+    if (result.status === 'CONFIRMED') {
+      const newTx: Transaction = {
+        id: `tx-sim-${Date.now()}`,
+        signature: result.signature || `5sol_auth_${Math.random().toString(36).substring(2, 8)}`,
+        agentId: result.agentId,
+        agentName,
+        providerId: 'prov-live',
+        providerName: result.vendor,
+        amountUsdc: result.amountUsdc,
+        token: 'USDC',
+        timestamp: 'Just now',
+        status: 'CONFIRMED',
+        networkFeeSol: 0.000005,
+        policyUsed: 'Tier 1 — Autonomous Fast-Path',
+        solanaExplorerUrl: 'https://explorer.solana.com/tx/simulated',
+        fromAddress: `${agentName.substring(0, 4)}...PDA`,
+        toAddress: `${result.vendor.split('.')[0]}...ATA`,
+      };
+      setTransactions((prev) => [newTx, ...prev]);
+      setWalletBalanceUsdc((prev) => Math.max(0, prev - result.amountUsdc));
+      setAgents((prev) =>
+        prev.map((a) =>
+          a.id === result.agentId
+            ? { ...a, spentThisMonthUsdc: a.spentThisMonthUsdc + result.amountUsdc, lastActive: 'Just now' }
+            : a
+        )
+      );
+      setNotifications((prev) => [
+        {
+          id: `notif-${Date.now()}`,
+          title: 'Authorized Payment Settled',
+          description: `${agentName} paid $${result.amountUsdc.toFixed(2)} USDC to ${result.vendor} via Solana Subscriptions.`,
+          timestamp: 'Just now',
+          unread: true,
+          type: 'SUCCESS',
+        },
+        ...prev,
+      ]);
+    } else if (result.status === 'BLOCKED_BY_POLICY') {
+      const blockedTx: Transaction = {
+        id: `tx-sim-${Date.now()}`,
+        signature: `BLOCKED_${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+        agentId: result.agentId,
+        agentName,
+        providerId: 'prov-blocked',
+        providerName: result.vendor,
+        amountUsdc: result.amountUsdc,
+        token: 'USDC',
+        timestamp: 'Just now',
+        status: 'BLOCKED_BY_POLICY',
+        networkFeeSol: 0.0,
+        failureReason: result.reason || 'Policy Violation: Request intercepted by Shlita Perimeter.',
+        policyUsed: 'Tier 1 — Autonomous Fast-Path',
+        solanaExplorerUrl: '#',
+        fromAddress: `${agentName.substring(0, 4)}...PDA`,
+        toAddress: `${result.vendor.split('.')[0]}...ATA`,
+      };
+      setTransactions((prev) => [blockedTx, ...prev]);
+      setSelectedTransaction(blockedTx);
+      setNotifications((prev) => [
+        {
+          id: `notif-${Date.now()}`,
+          title: 'Malicious Request Intercepted',
+          description: `${agentName} attempted to transact with ${result.vendor}. Firewall protected treasury ($0 drained).`,
+          timestamp: 'Just now',
+          unread: true,
+          type: 'VIOLATION',
+        },
+        ...prev,
+      ]);
+    } else if (result.status === 'CIRCUIT_TRIPPED') {
+      setAgents((prev) =>
+        prev.map((a) =>
+          a.id === result.agentId ? { ...a, status: 'CIRCUIT_TRIPPED', lastActive: 'Loop anomaly detected' } : a
+        )
+      );
+      setNotifications((prev) => [
+        {
+          id: `notif-${Date.now()}`,
+          title: '⚡ Circuit Breaker Tripped',
+          description: `${agentName} exceeded velocity limit (burst anomaly). Automatic lock engaged.`,
+          timestamp: 'Just now',
+          unread: true,
+          type: 'VIOLATION',
+        },
+        ...prev,
+      ]);
+    }
+  };
+
+  // --- EMERGENCY MASTER ACTIONS (COMMAND PALETTE) ---
+  const handleEmergencyFreezeAll = () => {
+    setAgents((prev) => prev.map((a) => ({ ...a, status: 'PAUSED' })));
+    setNotifications((prev) => [
+      {
+        id: `notif-${Date.now()}`,
+        title: '🚨 Master Freeze Engaged',
+        description: 'All 6 autonomous agents have been paused by operator command.',
+        timestamp: 'Just now',
+        unread: true,
+        type: 'VIOLATION',
+      },
+      ...prev,
+    ]);
+  };
+
+  const handleResetAllCircuits = () => {
+    setAgents((prev) =>
+      prev.map((a) => (a.status === 'CIRCUIT_TRIPPED' ? { ...a, status: 'ACTIVE' } : a))
+    );
+    setNotifications((prev) => [
+      {
+        id: `notif-${Date.now()}`,
+        title: 'Circuit Breakers Cleared',
+        description: 'All suspended agents restored to ACTIVE status.',
+        timestamp: 'Just now',
+        unread: true,
+        type: 'SUCCESS',
+      },
+      ...prev,
+    ]);
+  };
+
+  const handleExportCsv = () => {
+    const headers = ['ID', 'Signature', 'Agent', 'Provider', 'Amount USDC', 'Token', 'Status', 'Timestamp'];
+    const rows = transactions.map((t) => [
+      t.id,
+      t.signature,
+      t.agentName,
+      t.providerName,
+      t.amountUsdc,
+      t.token,
+      t.status,
+      t.timestamp,
+    ]);
+    const csvContent =
+      'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `shlita-audit-ledger-${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="min-h-screen bg-background text-text-primary flex transition-colors duration-200">
       {/* Persistent Collapsible Sidebar */}
@@ -250,6 +420,8 @@ export const App: React.FC = () => {
           walletBalanceUsdc={walletBalanceUsdc}
           theme={theme}
           onToggleTheme={toggleTheme}
+          onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+          onOpenSimulator={() => setIsSimulatorOpen(true)}
         />
 
         {/* Screen Routing */}
@@ -264,6 +436,7 @@ export const App: React.FC = () => {
               onSelectTransaction={setSelectedTransaction}
               onRunSimulation={handleRunSimulation}
               simulationStep={simulationStep}
+              onOpenSimulator={() => setIsSimulatorOpen(true)}
             />
           )}
 
@@ -331,6 +504,29 @@ export const App: React.FC = () => {
         isOpen={isCreateWizardOpen}
         onClose={() => setIsCreateWizardOpen(false)}
         onCreateAgent={handleAddAgent}
+      />
+
+      {/* Interactive Attack Simulator & Circuit Breaker Playground */}
+      <AttackSimulatorModal
+        isOpen={isSimulatorOpen}
+        onClose={() => setIsSimulatorOpen(false)}
+        agents={agents}
+        onApplyExecution={handleApplySimulationResult}
+        onResetCircuitBreaker={handleResetCircuitBreaker}
+      />
+
+      {/* Linear-Style Command Palette (Cmd + K) */}
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        onSelectScreen={setCurrentScreen}
+        onOpenSimulator={() => setIsSimulatorOpen(true)}
+        onOpenCreateAgent={() => setIsCreateWizardOpen(true)}
+        onToggleTheme={toggleTheme}
+        theme={theme}
+        onEmergencyFreezeAll={handleEmergencyFreezeAll}
+        onResetAllCircuits={handleResetAllCircuits}
+        onExportCsv={handleExportCsv}
       />
     </div>
   );

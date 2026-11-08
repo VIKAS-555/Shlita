@@ -6,6 +6,8 @@ import {
   ShieldCheck,
   Sun,
   Moon,
+  Search,
+  Zap,
 } from 'lucide-react';
 import { ScreenId } from './Sidebar.js';
 
@@ -17,6 +19,8 @@ interface TopNavProps {
   walletBalanceUsdc: number;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
+  onOpenCommandPalette: () => void;
+  onOpenSimulator: () => void;
 }
 
 export const TopNav: React.FC<TopNavProps> = ({
@@ -27,6 +31,8 @@ export const TopNav: React.FC<TopNavProps> = ({
   walletBalanceUsdc,
   theme,
   onToggleTheme,
+  onOpenCommandPalette,
+  onOpenSimulator,
 }) => {
   const [network, setNetwork] = useState<'mainnet-beta' | 'devnet'>('mainnet-beta');
   const [walletConnected, setWalletConnected] = useState(true);
@@ -56,8 +62,31 @@ export const TopNav: React.FC<TopNavProps> = ({
         <span className="text-text-primary font-semibold">{screenTitles[currentScreen]}</span>
       </div>
 
+      {/* Center Command Palette Quick Search Pill */}
+      <button
+        onClick={onOpenCommandPalette}
+        className="hidden md:flex items-center space-x-2 bg-card-elevated hover:bg-border/80 border border-border px-3.5 py-1.5 rounded-xl text-xs text-text-muted hover:text-text-primary transition font-sans shadow-sm cursor-pointer"
+        title="Quick Command Palette (⌘K)"
+      >
+        <Search size={13} className="text-text-muted" />
+        <span className="text-[11px]">Search actions & commands...</span>
+        <kbd className="text-[10px] bg-card px-1.5 py-0.5 rounded border border-border font-mono text-text-faint">
+          ⌘K
+        </kbd>
+      </button>
+
       {/* Right Controls */}
-      <div className="flex items-center space-x-3">
+      <div className="flex items-center space-x-2.5">
+        {/* Attack Simulator Live Button */}
+        <button
+          onClick={onOpenSimulator}
+          className="flex items-center space-x-1.5 bg-accent-violet/10 hover:bg-accent-violet/20 border border-accent-violet/30 text-accent-violet font-semibold text-xs px-3 py-1.5 rounded-xl transition shadow-sm cursor-pointer"
+          title="Open Attack Simulator & Circuit Breaker Playground (⌘P)"
+        >
+          <Zap size={13} className="text-accent-violet fill-accent-violet/20" />
+          <span className="hidden sm:inline">Simulator</span>
+        </button>
+
         {/* Network Indicator */}
         <div className="flex items-center space-x-2 bg-card-elevated border border-border px-3 py-1.5 rounded-xl text-xs">
           <div className="w-2 h-2 rounded-full bg-solana animate-pulse"></div>

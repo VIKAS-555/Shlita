@@ -30,6 +30,7 @@ interface OverviewScreenProps {
   onSelectTransaction: (tx: Transaction) => void;
   onRunSimulation: () => void;
   simulationStep: number;
+  onOpenSimulator?: () => void;
 }
 
 export const OverviewScreen: React.FC<OverviewScreenProps> = ({
@@ -41,6 +42,7 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
   onSelectTransaction,
   onRunSimulation,
   simulationStep,
+  onOpenSimulator,
 }) => {
   const [timeRange, setTimeRange] = useState<'day' | 'week' | 'month'>('month');
 
@@ -82,20 +84,16 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
         {/* Hero Interactive Simulation CTA */}
         <div className="flex items-center space-x-2.5">
           <button
-            onClick={onRunSimulation}
+            onClick={onOpenSimulator || onRunSimulation}
             className="flex items-center space-x-2 bg-gradient-to-r from-accent-violet via-solana-purple to-solana hover:opacity-95 text-white font-semibold text-xs px-4 py-2.5 rounded-xl shadow-sm transition group cursor-pointer"
+            title="Open Interactive Attack Simulator & Circuit Breaker Playground"
           >
             <Play size={13} className="fill-white group-hover:scale-110 transition" />
-            <span>
-              {simulationStep === 0 && 'Run Agent Spending Simulation'}
-              {simulationStep === 1 && 'Step 1: Authorized $0.02 Call (Approved ✔)'}
-              {simulationStep === 2 && 'Step 2: High-Cost $0.08 Call (Blocked 🛑)'}
-              {simulationStep === 3 && 'Simulation Reset'}
-            </span>
+            <span>Attack Simulator & Playground</span>
           </button>
           <button
             onClick={onOpenCreateAgent}
-            className="text-xs bg-card-elevated hover:bg-border text-text-primary border border-border px-3.5 py-2.5 rounded-xl transition shadow-sm"
+            className="text-xs bg-card-elevated hover:bg-border text-text-primary border border-border px-3.5 py-2.5 rounded-xl transition shadow-sm cursor-pointer"
           >
             + Add Agent
           </button>
