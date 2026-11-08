@@ -20,6 +20,7 @@ import {
   Download,
   Globe,
   CornerDownLeft,
+  Sparkles,
 } from 'lucide-react';
 import { ScreenId } from '../layout/Sidebar.js';
 
@@ -44,6 +45,7 @@ interface CommandPaletteProps {
   onEmergencyFreezeAll: () => void;
   onResetAllCircuits: () => void;
   onExportCsv: () => void;
+  onOpenTour?: () => void;
 }
 
 export const CommandPalette: React.FC<CommandPaletteProps> = ({
@@ -57,12 +59,25 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onEmergencyFreezeAll,
   onResetAllCircuits,
   onExportCsv,
+  onOpenTour,
 }) => {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const commands: CommandItem[] = [
+    // Tour & Guided Demo
+    {
+      id: 'open-tour',
+      title: 'Start 60-Second Guided Demo Tour',
+      subtitle: 'Walk through all 5 architectural defense tiers with interactive auto-play',
+      category: 'Actions & Security',
+      icon: Sparkles,
+      action: () => {
+        if (onOpenTour) onOpenTour();
+        onClose();
+      },
+    },
     // Security & Simulator Actions
     {
       id: 'open-simulator',

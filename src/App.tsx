@@ -15,6 +15,8 @@ import { CreateAgentWizard } from './components/modals/CreateAgentWizard.js';
 import { AttackSimulatorModal, SimulatorExecutionResult } from './components/simulator/AttackSimulatorModal.js';
 import { CommandPalette } from './components/palette/CommandPalette.js';
 import { TelemetryDrawer, TelemetryEvent } from './components/telemetry/TelemetryDrawer.js';
+import { GuidedDemoTour } from './components/tour/GuidedDemoTour.js';
+import { sounds } from './utils/audio.js';
 import {
   INITIAL_AGENTS,
   INITIAL_NOTIFICATIONS,
@@ -88,6 +90,7 @@ export const App: React.FC = () => {
   const [isCreateWizardOpen, setIsCreateWizardOpen] = useState(false);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isTourOpen, setIsTourOpen] = useState(false);
 
   // Global Keyboard Shortcuts (Cmd+K for Command Palette, Cmd+P for Simulator)
   useEffect(() => {
@@ -174,6 +177,7 @@ export const App: React.FC = () => {
         return a;
       })
     );
+    sounds.playSuccess();
     addTelemetryLog({
       type: 'APPROVED',
       statusCode: 200,
@@ -198,6 +202,7 @@ export const App: React.FC = () => {
 
   const handleAddAgent = (newAgent: Agent) => {
     setAgents([newAgent, ...agents]);
+    sounds.playSuccess();
     addTelemetryLog({
       type: 'APPROVED',
       statusCode: 201,
@@ -257,6 +262,7 @@ export const App: React.FC = () => {
         a.id === agentId ? { ...a, dailyBudgetUsdc: dailyBudget, monthlyBudgetUsdc: monthlyBudget } : a
       )
     );
+    sounds.playSuccess();
     addTelemetryLog({
       type: 'APPROVED',
       statusCode: 200,
@@ -272,6 +278,7 @@ export const App: React.FC = () => {
     setAgents((prev) =>
       prev.map((a) => (a.id === agentId ? { ...a, allowedVendors: vendors } : a))
     );
+    sounds.playSuccess();
     addTelemetryLog({
       type: 'APPROVED',
       statusCode: 200,
@@ -284,6 +291,11 @@ export const App: React.FC = () => {
   };
 
   const handleMasterTogglePauseAll = (freeze: boolean) => {
+    if (freeze) {
+      sounds.playCircuitHum();
+    } else {
+      sounds.playSuccess();
+    }
     setAgents((prev) => prev.map((a) => ({ ...a, status: freeze ? 'PAUSED' : 'ACTIVE' })));
     addTelemetryLog({
       type: freeze ? 'BLOCKED' : 'APPROVED',
@@ -314,6 +326,7 @@ export const App: React.FC = () => {
     amountUsdc: number;
     provider: string;
   }) => {
+    sounds.playMultiSigLock();
     setPendingApprovals((prev) => prev.filter((p) => p.id !== item.id));
 
     const newTx: Transaction = {
@@ -368,6 +381,7 @@ export const App: React.FC = () => {
   // --- CENTERPIECE SIMULATION FLOW ---
   const handleRunSimulation = () => {
     if (simulationStep === 0) {
+      sounds.playSuccess();
       // Step 1: Authorized $0.02 call
       const newTx: Transaction = {
         id: `tx-sim-1-${Date.now()}`,
@@ -421,6 +435,7 @@ export const App: React.FC = () => {
       ]);
       setSimulationStep(1);
     } else if (simulationStep === 1) {
+      sounds.playBlocked();
       // Step 2: Blocked $0.08 call (exceeds $0.05 per-call cap)
       const blockedTx: Transaction = {
         id: `tx-sim-2-${Date.now()}`,
@@ -477,6 +492,7 @@ export const App: React.FC = () => {
     const agentName = targetAgent ? targetAgent.name : result.agentId;
 
     if (result.status === 'CONFIRMED') {
+      sounds.playSuccess();
       const newTx: Transaction = {
         id: `tx-sim-${Date.now()}`,
         signature: result.signature || `5sol_auth_${Math.random().toString(36).substring(2, 8)}`,
@@ -527,6 +543,7 @@ export const App: React.FC = () => {
         ...prev,
       ]);
     } else if (result.status === 'BLOCKED_BY_POLICY') {
+      sounds.playBlocked();
       const blockedTx: Transaction = {
         id: `tx-sim-${Date.now()}`,
         signature: `BLOCKED_${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
@@ -570,6 +587,7 @@ export const App: React.FC = () => {
         ...prev,
       ]);
     } else if (result.status === 'CIRCUIT_TRIPPED') {
+      sounds.playCircuitHum();
       setAgents((prev) =>
         prev.map((a) =>
           a.id === result.agentId ? { ...a, status: 'CIRCUIT_TRIPPED', lastActive: 'Loop anomaly detected' } : a
@@ -609,6 +627,7 @@ export const App: React.FC = () => {
     setAgents((prev) =>
       prev.map((a) => (a.status === 'CIRCUIT_TRIPPED' ? { ...a, status: 'ACTIVE' } : a))
     );
+    sounds.playSuccess();
     addTelemetryLog({
       type: 'APPROVED',
       statusCode: 200,
@@ -683,6 +702,7 @@ export const App: React.FC = () => {
           onToggleTheme={toggleTheme}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
           onOpenSimulator={() => setIsSimulatorOpen(true)}
+          onOpenTour={() => setIsTourOpen(true)}
         />
 
         {/* Screen Routing */}
@@ -799,6 +819,14 @@ export const App: React.FC = () => {
         onEmergencyFreezeAll={handleEmergencyFreezeAll}
         onResetAllCircuits={handleResetAllCircuits}
         onExportCsv={handleExportCsv}
+        onOpenTour={() => setIsTourOpen(true)}
+      />
+
+      {/* 60-Second Guided Demo Tour */}
+      <GuidedDemoTour
+        isOpen={isTourOpen}
+        onClose={() => setIsTourOpen(false)}
+        onNavigateScreen={setCurrentScreen}
       />
 
       {/* Real-Time Cyberpunk Live Telemetry Console Drawer */}

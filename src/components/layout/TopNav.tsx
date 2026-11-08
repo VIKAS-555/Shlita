@@ -6,8 +6,12 @@ import {
   Moon,
   Search,
   Zap,
+  Volume2,
+  VolumeX,
+  Sparkles,
 } from 'lucide-react';
 import { ScreenId } from './Sidebar.js';
+import { sounds } from '../../utils/audio.js';
 
 interface TopNavProps {
   currentScreen: ScreenId;
@@ -19,6 +23,7 @@ interface TopNavProps {
   onToggleTheme: () => void;
   onOpenCommandPalette: () => void;
   onOpenSimulator: () => void;
+  onOpenTour?: () => void;
 }
 
 export const TopNav: React.FC<TopNavProps> = ({
@@ -30,8 +35,15 @@ export const TopNav: React.FC<TopNavProps> = ({
   onToggleTheme,
   onOpenCommandPalette,
   onOpenSimulator,
+  onOpenTour,
 }) => {
   const [walletConnected, setWalletConnected] = useState(true);
+  const [isMuted, setIsMuted] = useState(() => sounds.getMuted());
+
+  const handleToggleSound = () => {
+    const next = sounds.toggleMute();
+    setIsMuted(next);
+  };
 
   const screenTitles: Record<ScreenId, string> = {
     overview: 'Overview',
@@ -58,7 +70,10 @@ export const TopNav: React.FC<TopNavProps> = ({
 
       {/* Center: Sleek Search Capsule (Linear Style) */}
       <button
-        onClick={onOpenCommandPalette}
+        onClick={() => {
+          sounds.playClick();
+          onOpenCommandPalette();
+        }}
         className="hidden md:flex items-center space-x-2.5 bg-card-elevated/70 hover:bg-card-elevated border border-border hover:border-border-hover px-4 py-1.5 rounded-full text-xs text-text-muted hover:text-text-primary transition shadow-sm w-72 justify-between cursor-pointer group"
         title="Open Command Palette (⌘K)"
       >
@@ -71,11 +86,26 @@ export const TopNav: React.FC<TopNavProps> = ({
         </kbd>
       </button>
 
-      {/* Right: Unified & Decluttered Controls */}
-      <div className="flex items-center space-x-2.5">
+      {/* Right: Unified Controls */}
+      <div className="flex items-center space-x-2">
+        {/* 60s Guided Demo Walkthrough */}
+        {onOpenTour && (
+          <button
+            onClick={() => {
+              sounds.playClick();
+              onOpenTour();
+            }}
+            className="flex items-center space-x-1.5 bg-solana/10 hover:bg-solana/20 text-solana border border-solana/30 font-semibold text-xs px-3 py-1.5 rounded-full transition shadow-sm cursor-pointer"
+            title="Start 60-second Guided Demo Tour"
+          >
+            <Sparkles size={12} />
+            <span className="hidden sm:inline">60s Tour</span>
+          </button>
+        )}
+
         {/* Network & Policy Status Pill */}
         <div
-          className="flex items-center space-x-2 bg-card-elevated/60 border border-border px-3 py-1.5 rounded-full text-xs font-mono"
+          className="hidden lg:flex items-center space-x-2 bg-card-elevated/60 border border-border px-3 py-1.5 rounded-full text-xs font-mono"
           title="Solana Mainnet: Policies Active & Enforcing"
         >
           <span className="relative flex h-2 w-2">
@@ -87,7 +117,10 @@ export const TopNav: React.FC<TopNavProps> = ({
 
         {/* Wallet Balance Pill */}
         <button
-          onClick={() => setWalletConnected(!walletConnected)}
+          onClick={() => {
+            sounds.playClick();
+            setWalletConnected(!walletConnected);
+          }}
           className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-full text-xs font-mono border transition shadow-sm cursor-pointer ${
             walletConnected
               ? 'bg-card-elevated/60 border-border text-text-primary hover:border-border-hover'
@@ -103,7 +136,10 @@ export const TopNav: React.FC<TopNavProps> = ({
 
         {/* Single Primary Action: Simulator */}
         <button
-          onClick={onOpenSimulator}
+          onClick={() => {
+            sounds.playClick();
+            onOpenSimulator();
+          }}
           className="flex items-center space-x-1.5 bg-gradient-to-r from-accent-violet to-solana-purple hover:opacity-95 text-white font-semibold text-xs px-3.5 py-1.5 rounded-full shadow-sm transition cursor-pointer"
           title="Open Attack Simulator & Circuit Breaker Playground (⌘P)"
         >
@@ -111,10 +147,26 @@ export const TopNav: React.FC<TopNavProps> = ({
           <span className="hidden sm:inline">Simulator</span>
         </button>
 
-        {/* Utilities: Theme Switcher & Notifications */}
+        {/* Utilities: Audio SFX, Theme Switcher & Notifications */}
         <div className="flex items-center space-x-0.5 pl-1.5 border-l border-border/80">
+          {/* High-Tech Audio SFX Toggle */}
           <button
-            onClick={onToggleTheme}
+            onClick={handleToggleSound}
+            className={`p-1.5 rounded-xl transition cursor-pointer ${
+              isMuted
+                ? 'text-text-faint hover:text-text-muted hover:bg-card-elevated'
+                : 'text-solana hover:bg-solana/10'
+            }`}
+            title={isMuted ? 'Sound FX Muted (Click to Unmute)' : 'High-Tech Audio FX Enabled'}
+          >
+            {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+          </button>
+
+          <button
+            onClick={() => {
+              sounds.playClick();
+              onToggleTheme();
+            }}
             className="p-1.5 rounded-xl text-text-muted hover:text-text-primary hover:bg-card-elevated transition cursor-pointer"
             title={theme === 'dark' ? 'Switch to Light mode' : 'Switch to Dark mode'}
           >
@@ -122,7 +174,10 @@ export const TopNav: React.FC<TopNavProps> = ({
           </button>
 
           <button
-            onClick={() => onSelectScreen('notifications')}
+            onClick={() => {
+              sounds.playClick();
+              onSelectScreen('notifications');
+            }}
             className="relative p-1.5 rounded-xl text-text-muted hover:text-text-primary hover:bg-card-elevated transition cursor-pointer"
             title="Notifications"
           >

@@ -20,6 +20,7 @@ import {
 } from 'recharts';
 import { Agent, SpendingPolicy, Transaction } from '../../types/dashboard.js';
 import { ScreenId } from '../layout/Sidebar.js';
+import { SolanaArchitectureFlow } from '../visualizer/SolanaArchitectureFlow.js';
 
 interface OverviewScreenProps {
   agents: Agent[];
@@ -178,6 +179,17 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Live Interactive Solana Architecture & Cryptographic Flowchart */}
+      <SolanaArchitectureFlow
+        initialState={
+          simulationStep === 1
+            ? 'AUTHORIZED'
+            : simulationStep === 2
+            ? 'BLOCKED'
+            : 'IDLE'
+        }
+      />
 
       {/* Main Grid: Chart + Utilization (2 Cols) vs Right Rail (1 Col) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
