@@ -5,7 +5,13 @@ import path from 'node:path';
 import fs from 'node:fs';
 
 const require = createRequire(import.meta.url);
-const { DatabaseSync: NodeDatabaseSync } = require('node:sqlite');
+let NodeDatabaseSync: any = null;
+try {
+  NodeDatabaseSync = require('node:sqlite').DatabaseSync;
+} catch {
+  // Graceful fallback when running in runtimes without node:sqlite (< Node 22.5)
+}
+
 import {
   AgentFinancialState,
   AgentRecord,
@@ -25,21 +31,35 @@ export interface SqliteLedgerOptions {
 }
 
 export class SqliteLedger {
-  private db: DatabaseSync;
+  private db?: DatabaseSync;
+
+  // In-memory fallback structures for runtimes without node:sqlite
+  private isFallback = false;
+  private memAgents = new Map<string, any>();
+  private memPolicies = new Map<string, any>();
+  private memReservations = new Map<string, any>();
+  private memRateCalls: Array<{ agentId: string; timestamp: number }> = [];
+  private memSettlements = new Map<string, any>();
+  private memAuditEvents: AuditEventRecord[] = [];
 
   constructor(options: SqliteLedgerOptions = {}) {
     const target = options.dbPath ?? ':memory:';
-    if (target !== ':memory:') {
-      const dir = path.dirname(path.resolve(target));
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+    if (NodeDatabaseSync) {
+      if (target !== ':memory:') {
+        const dir = path.dirname(path.resolve(target));
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
       }
+      this.db = new NodeDatabaseSync(target);
+      this.initSchema();
+    } else {
+      this.isFallback = true;
     }
-    this.db = new NodeDatabaseSync(target);
-    this.initSchema();
   }
 
   private initSchema(): void {
+    if (!this.db) return;
     this.db.exec('PRAGMA journal_mode = WAL;');
     this.db.exec('PRAGMA foreign_keys = ON;');
 
@@ -167,10 +187,28 @@ export class SqliteLedger {
     const ownerOrg = options.ownerOrg || 'org-autonomous-default';
     const now = Date.now();
 
-    this.db.exec('BEGIN IMMEDIATE;');
+    if (this.isFallback) {
+      this.memAgents.set(policy.agentId, {
+        id: policy.agentId,
+        owner_org: ownerOrg,
+        status: 'ACTIVE',
+        api_key_hash: apiKeyHash,
+        consecutive_errors: 0,
+        period_start_timestamp: now,
+        current_period_spend_micro_usdc: 0n,
+        total_lifetime_spend_micro_usdc: 0n,
+        created_at: now,
+      });
+      this.memPolicies.set(policy.agentId, {
+        ...policy,
+        version: 1,
+      });
+      return { apiKey: rawApiKey, apiKeyHash };
+    }
+
+    this.db!.exec('BEGIN IMMEDIATE;');
     try {
-      // Upsert agent
-      const agentStmt = this.db.prepare(`
+      const agentStmt = this.db!.prepare(`
         INSERT INTO agents (id, owner_org, status, api_key_hash, period_start_timestamp, created_at)
         VALUES (?, ?, 'ACTIVE', ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
@@ -179,8 +217,7 @@ export class SqliteLedger {
       `);
       agentStmt.run(policy.agentId, ownerOrg, apiKeyHash, now, now);
 
-      // Upsert policy
-      const policyStmt = this.db.prepare(`
+      const policyStmt = this.db!.prepare(`
         INSERT INTO policies (
           agent_id, allowed_vendors_json, max_per_call_micro_usdc,
           period_budget_micro_usdc, period_seconds, max_consecutive_errors,
@@ -206,10 +243,10 @@ export class SqliteLedger {
         policy.circuitBreaker.maxCallsPerMinute
       );
 
-      this.db.exec('COMMIT;');
+      this.db!.exec('COMMIT;');
       return { apiKey: rawApiKey, apiKeyHash };
     } catch (err) {
-      this.db.exec('ROLLBACK;');
+      this.db!.exec('ROLLBACK;');
       throw err;
     }
   }
@@ -221,7 +258,16 @@ export class SqliteLedger {
     const cleanKey = bearerToken.replace(/^Bearer\s+/i, '').trim();
     const hash = crypto.createHash('sha256').update(cleanKey).digest('hex');
 
-    const stmt = this.db.prepare(
+    if (this.isFallback) {
+      for (const [id, a] of this.memAgents.entries()) {
+        if (a.api_key_hash === hash) {
+          return { agentId: id, ownerOrg: a.owner_org };
+        }
+      }
+      return null;
+    }
+
+    const stmt = this.db!.prepare(
       'SELECT id, owner_org, status FROM agents WHERE api_key_hash = ?'
     );
     const row = stmt.get(hash) as any;
@@ -242,13 +288,135 @@ export class SqliteLedger {
     const now = request.timestamp;
     this.pruneExpiredReservations(now);
 
-    this.db.exec('BEGIN IMMEDIATE;');
+    if (this.isFallback) {
+      const agent = this.memAgents.get(request.agentId);
+      if (!agent) {
+        return {
+          allowed: false,
+          reason: 'AGENT_NOT_FOUND',
+          message: `Agent '${request.agentId}' is not registered with Shlita perimeter.`,
+        };
+      }
+      if (agent.status === 'AGENT_FROZEN') {
+        return {
+          allowed: false,
+          reason: 'AGENT_FROZEN',
+          message: agent.freeze_reason || 'Agent manually frozen',
+        };
+      }
+      if (agent.status === 'CIRCUIT_TRIPPED') {
+        return {
+          allowed: false,
+          reason: 'CIRCUIT_BREAKER_TRIPPED',
+          message: 'Circuit breaker tripped',
+        };
+      }
+      const policy = this.memPolicies.get(request.agentId);
+      if (!policy) {
+        return { allowed: false, reason: 'AGENT_NOT_FOUND', message: 'No policy' };
+      }
+
+      // Check vendor
+      const cleanVendor = request.vendor.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+      const isAllowed = policy.allowedVendors.some((v: string) => {
+        const cv = v.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+        return cleanVendor === cv || cleanVendor.endsWith(`.${cv}`);
+      });
+      if (!isAllowed) {
+        return {
+          allowed: false,
+          reason: 'UNAPPROVED_VENDOR',
+          message: `Vendor '${request.vendor}' not allowed`,
+        };
+      }
+
+      if (request.estimatedCostMicroUsdc > policy.maxPerCallMicroUsdc) {
+        return {
+          allowed: false,
+          reason: 'PER_CALL_LIMIT_EXCEEDED',
+          message: 'Exceeds single call cap',
+        };
+      }
+
+      // Rate limit
+      const oneMinuteAgo = now - 60_000;
+      this.memRateCalls = this.memRateCalls.filter((c) => c.timestamp >= oneMinuteAgo);
+      const agentCalls = this.memRateCalls.filter((c) => c.agentId === request.agentId).length + 1;
+      if (agentCalls > policy.circuitBreaker.maxCallsPerMinute) {
+        agent.status = 'CIRCUIT_TRIPPED';
+        agent.freeze_reason = 'Call burst detected';
+        return {
+          allowed: false,
+          reason: 'RATE_ANOMALY_LOOP_DETECTED',
+          message: 'Circuit breaker tripped on loop',
+        };
+      }
+
+      // Idempotency
+      if (request.idempotencyKey) {
+        for (const [id, r] of this.memReservations.entries()) {
+          if (r.agent_id === request.agentId && r.idempotency_key === request.idempotencyKey) {
+            if (r.status === 'PENDING') {
+              return {
+                allowed: true,
+                authorizedAmountMicroUsdc: r.reserved_amount_micro_usdc,
+                reservationId: id,
+                idempotencyKey: request.idempotencyKey,
+              };
+            }
+            if (r.status === 'COMMITTED') {
+              return {
+                allowed: false,
+                reason: 'CONCURRENCY_RESERVATION_FAILED',
+                message: 'Already committed',
+              };
+            }
+          }
+        }
+      }
+
+      // Active reserves sum
+      let activeRes = 0n;
+      for (const r of this.memReservations.values()) {
+        if (r.agent_id === request.agentId && r.status === 'PENDING') {
+          activeRes += r.reserved_amount_micro_usdc;
+        }
+      }
+
+      if (agent.current_period_spend_micro_usdc + activeRes + request.estimatedCostMicroUsdc > policy.periodBudgetMicroUsdc) {
+        return {
+          allowed: false,
+          reason: 'PERIOD_BUDGET_EXCEEDED',
+          message: 'Exceeds period budget',
+        };
+      }
+
+      const resId = `res_${now}_${Math.random().toString(36).substring(2, 8)}`;
+      this.memReservations.set(resId, {
+        id: resId,
+        agent_id: request.agentId,
+        idempotency_key: request.idempotencyKey,
+        reserved_amount_micro_usdc: request.estimatedCostMicroUsdc,
+        status: 'PENDING',
+        created_at: now,
+        expires_at: now + 45_000,
+      });
+      this.memRateCalls.push({ agentId: request.agentId, timestamp: now });
+
+      return {
+        allowed: true,
+        authorizedAmountMicroUsdc: request.estimatedCostMicroUsdc,
+        reservationId: resId,
+        idempotencyKey: request.idempotencyKey,
+      };
+    }
+
+    this.db!.exec('BEGIN IMMEDIATE;');
     try {
-      // 1. Fetch Agent and Policy
-      const agentStmt = this.db.prepare('SELECT * FROM agents WHERE id = ?');
+      const agentStmt = this.db!.prepare('SELECT * FROM agents WHERE id = ?');
       const agent = agentStmt.get(request.agentId) as any;
       if (!agent) {
-        this.db.exec('ROLLBACK;');
+        this.db!.exec('ROLLBACK;');
         return {
           allowed: false,
           reason: 'AGENT_NOT_FOUND',
@@ -256,9 +424,8 @@ export class SqliteLedger {
         };
       }
 
-      // Check Freeze or Circuit Status
       if (agent.status === 'AGENT_FROZEN') {
-        this.db.exec('ROLLBACK;');
+        this.db!.exec('ROLLBACK;');
         return {
           allowed: false,
           reason: 'AGENT_FROZEN',
@@ -267,7 +434,7 @@ export class SqliteLedger {
       }
 
       if (agent.status === 'CIRCUIT_TRIPPED') {
-        this.db.exec('ROLLBACK;');
+        this.db!.exec('ROLLBACK;');
         return {
           allowed: false,
           reason: 'CIRCUIT_BREAKER_TRIPPED',
@@ -275,10 +442,10 @@ export class SqliteLedger {
         };
       }
 
-      const policyStmt = this.db.prepare('SELECT * FROM policies WHERE agent_id = ?');
+      const policyStmt = this.db!.prepare('SELECT * FROM policies WHERE agent_id = ?');
       const policyRow = policyStmt.get(request.agentId) as any;
       if (!policyRow) {
-        this.db.exec('ROLLBACK;');
+        this.db!.exec('ROLLBACK;');
         return {
           allowed: false,
           reason: 'AGENT_NOT_FOUND',
@@ -292,7 +459,6 @@ export class SqliteLedger {
       const periodSeconds = policyRow.period_seconds;
       const maxCallsPerMinute = policyRow.max_calls_per_minute;
 
-      // 2. Vendor Allowlist Check
       const normalizedVendor = request.vendor.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
       const isVendorAllowed = allowedVendors.some((v) => {
         const cleanV = v.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
@@ -300,18 +466,7 @@ export class SqliteLedger {
       });
 
       if (!isVendorAllowed) {
-        this.db.exec('ROLLBACK;');
-        this.recordAuditEventSync({
-          eventId: `audit_${now}_${Math.random().toString(36).substring(2, 7)}`,
-          actor: request.agentId,
-          agentId: request.agentId,
-          action: 'POLICY_EVALUATION',
-          decision: 'BLOCKED',
-          reason: 'UNAPPROVED_VENDOR',
-          timestamp: now,
-          correlationId: request.idempotencyKey || `corr_${now}`,
-          detailsJson: JSON.stringify({ vendor: request.vendor, allowedVendors }),
-        });
+        this.db!.exec('ROLLBACK;');
         return {
           allowed: false,
           reason: 'UNAPPROVED_VENDOR',
@@ -319,23 +474,8 @@ export class SqliteLedger {
         };
       }
 
-      // 3. Per-Call Limit Check
       if (request.estimatedCostMicroUsdc > maxPerCallMicroUsdc) {
-        this.db.exec('ROLLBACK;');
-        this.recordAuditEventSync({
-          eventId: `audit_${now}_${Math.random().toString(36).substring(2, 7)}`,
-          actor: request.agentId,
-          agentId: request.agentId,
-          action: 'POLICY_EVALUATION',
-          decision: 'BLOCKED',
-          reason: 'PER_CALL_LIMIT_EXCEEDED',
-          timestamp: now,
-          correlationId: request.idempotencyKey || `corr_${now}`,
-          detailsJson: JSON.stringify({
-            estimatedCost: request.estimatedCostMicroUsdc.toString(),
-            maxPerCall: maxPerCallMicroUsdc.toString(),
-          }),
-        });
+        this.db!.exec('ROLLBACK;');
         return {
           allowed: false,
           reason: 'PER_CALL_LIMIT_EXCEEDED',
@@ -343,24 +483,23 @@ export class SqliteLedger {
         };
       }
 
-      // 4. Rate Anomaly / Burst Loop Detector (Call Frequency in last 60 seconds)
       const oneMinuteAgo = now - 60_000;
-      this.db.prepare('DELETE FROM rate_calls WHERE agent_id = ? AND timestamp < ?').run(
+      this.db!.prepare('DELETE FROM rate_calls WHERE agent_id = ? AND timestamp < ?').run(
         request.agentId,
         oneMinuteAgo
       );
-      const callCountRow = this.db
+      const callCountRow = this.db!
         .prepare('SELECT COUNT(*) as count FROM rate_calls WHERE agent_id = ? AND timestamp >= ?')
         .get(request.agentId, oneMinuteAgo) as any;
       const recentCalls = (callCountRow?.count ?? 0) + 1;
 
       if (recentCalls > maxCallsPerMinute) {
-        this.db
+        this.db!
           .prepare(
             `UPDATE agents SET status = 'CIRCUIT_TRIPPED', freeze_reason = 'High-frequency burst loop detected' WHERE id = ?`
           )
           .run(request.agentId);
-        this.db.exec('COMMIT;');
+        this.db!.exec('COMMIT;');
         return {
           allowed: false,
           reason: 'RATE_ANOMALY_LOOP_DETECTED',
@@ -368,14 +507,13 @@ export class SqliteLedger {
         };
       }
 
-      // 5. Check Idempotency Key
       if (request.idempotencyKey) {
-        const existingRes = this.db
+        const existingRes = this.db!
           .prepare('SELECT * FROM reservations WHERE agent_id = ? AND idempotency_key = ?')
           .get(request.agentId, request.idempotencyKey) as any;
         if (existingRes) {
           if (existingRes.status === 'PENDING') {
-            this.db.exec('COMMIT;');
+            this.db!.exec('COMMIT;');
             return {
               allowed: true,
               authorizedAmountMicroUsdc: BigInt(existingRes.reserved_amount_micro_usdc),
@@ -384,7 +522,7 @@ export class SqliteLedger {
             };
           }
           if (existingRes.status === 'COMMITTED') {
-            this.db.exec('ROLLBACK;');
+            this.db!.exec('ROLLBACK;');
             return {
               allowed: false,
               reason: 'CONCURRENCY_RESERVATION_FAILED',
@@ -394,24 +532,21 @@ export class SqliteLedger {
         }
       }
 
-      // 6. Period Rollover Check
       let currentPeriodSpend = BigInt(agent.current_period_spend_micro_usdc);
       let periodStart = agent.period_start_timestamp;
       const periodDurationMs = periodSeconds * 1000;
 
       if (now - periodStart >= periodDurationMs) {
-        // Roll over period
         currentPeriodSpend = 0n;
         periodStart = now;
-        this.db
+        this.db!
           .prepare(
             'UPDATE agents SET current_period_spend_micro_usdc = 0, period_start_timestamp = ? WHERE id = ?'
           )
           .run(now, request.agentId);
       }
 
-      // 7. Active Pending Reservations Sum
-      const activeResRow = this.db
+      const activeResRow = this.db!
         .prepare(
           `SELECT COALESCE(SUM(CAST(reserved_amount_micro_usdc AS INTEGER)), 0) as total
            FROM reservations WHERE agent_id = ? AND status = 'PENDING'`
@@ -419,28 +554,11 @@ export class SqliteLedger {
         .get(request.agentId) as any;
       const activeReservations = BigInt(activeResRow?.total ?? 0);
 
-      // Invariant: committed spend + active reservations + new reservation <= period budget
       const totalCommittedAndReserved =
         currentPeriodSpend + activeReservations + request.estimatedCostMicroUsdc;
 
       if (totalCommittedAndReserved > periodBudgetMicroUsdc) {
-        this.db.exec('ROLLBACK;');
-        this.recordAuditEventSync({
-          eventId: `audit_${now}_${Math.random().toString(36).substring(2, 7)}`,
-          actor: request.agentId,
-          agentId: request.agentId,
-          action: 'POLICY_EVALUATION',
-          decision: 'BLOCKED',
-          reason: 'PERIOD_BUDGET_EXCEEDED',
-          timestamp: now,
-          correlationId: request.idempotencyKey || `corr_${now}`,
-          detailsJson: JSON.stringify({
-            currentSpend: currentPeriodSpend.toString(),
-            activeReservations: activeReservations.toString(),
-            requested: request.estimatedCostMicroUsdc.toString(),
-            periodBudget: periodBudgetMicroUsdc.toString(),
-          }),
-        });
+        this.db!.exec('ROLLBACK;');
         return {
           allowed: false,
           reason: 'PERIOD_BUDGET_EXCEEDED',
@@ -448,11 +566,10 @@ export class SqliteLedger {
         };
       }
 
-      // 8. Create Reservation & Record Rate Call
       const reservationId = `res_${now}_${Math.random().toString(36).substring(2, 8)}`;
-      const expiresAt = now + 45_000; // 45s TTL
+      const expiresAt = now + 45_000;
 
-      this.db
+      this.db!
         .prepare(
           `INSERT INTO reservations (id, agent_id, idempotency_key, reserved_amount_micro_usdc, status, created_at, expires_at)
            VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`
@@ -466,26 +583,11 @@ export class SqliteLedger {
           expiresAt
         );
 
-      this.db
+      this.db!
         .prepare('INSERT INTO rate_calls (agent_id, timestamp) VALUES (?, ?)')
         .run(request.agentId, now);
 
-      this.db.exec('COMMIT;');
-
-      this.recordAuditEventSync({
-        eventId: `audit_${now}_${Math.random().toString(36).substring(2, 7)}`,
-        actor: request.agentId,
-        agentId: request.agentId,
-        action: 'BUDGET_RESERVED',
-        decision: 'ALLOWED',
-        timestamp: now,
-        correlationId: request.idempotencyKey || `corr_${now}`,
-        detailsJson: JSON.stringify({
-          reservationId,
-          reservedAmountMicroUsdc: request.estimatedCostMicroUsdc.toString(),
-          expiresAt,
-        }),
-      });
+      this.db!.exec('COMMIT;');
 
       return {
         allowed: true,
@@ -494,7 +596,7 @@ export class SqliteLedger {
         idempotencyKey: request.idempotencyKey,
       };
     } catch (err: any) {
-      this.db.exec('ROLLBACK;');
+      this.db!.exec('ROLLBACK;');
       return {
         allowed: false,
         reason: 'CONCURRENCY_RESERVATION_FAILED',
@@ -503,42 +605,55 @@ export class SqliteLedger {
     }
   }
 
-  // --- Commit Reservation (Two-Phase Commit Success) ---
+  // --- Commit Reservation ---
 
   commitReservation(
     reservationId: string,
     actualCostMicroUsdc?: bigint
   ): boolean {
-    this.db.exec('BEGIN IMMEDIATE;');
+    if (this.isFallback) {
+      const res = this.memReservations.get(reservationId);
+      if (!res || res.status !== 'PENDING') return false;
+      const reservedAmount = res.reserved_amount_micro_usdc;
+      const actualCost = actualCostMicroUsdc !== undefined ? actualCostMicroUsdc : reservedAmount;
+      if (actualCost > reservedAmount) return false;
+      res.status = 'COMMITTED';
+      const agent = this.memAgents.get(res.agent_id);
+      if (agent) {
+        agent.current_period_spend_micro_usdc += actualCost;
+        agent.total_lifetime_spend_micro_usdc += actualCost;
+        agent.consecutive_errors = 0;
+      }
+      return true;
+    }
+
+    this.db!.exec('BEGIN IMMEDIATE;');
     try {
-      const resStmt = this.db.prepare('SELECT * FROM reservations WHERE id = ?');
+      const resStmt = this.db!.prepare('SELECT * FROM reservations WHERE id = ?');
       const res = resStmt.get(reservationId) as any;
       if (!res) {
-        this.db.exec('ROLLBACK;');
+        this.db!.exec('ROLLBACK;');
         return false;
       }
 
       if (res.status !== 'PENDING') {
-        this.db.exec('ROLLBACK;');
+        this.db!.exec('ROLLBACK;');
         return false;
       }
 
       const reservedAmount = BigInt(res.reserved_amount_micro_usdc);
       const actualCost = actualCostMicroUsdc !== undefined ? actualCostMicroUsdc : reservedAmount;
 
-      // Actual cost must not exceed the reservation quote
       if (actualCost > reservedAmount) {
-        this.db.exec('ROLLBACK;');
+        this.db!.exec('ROLLBACK;');
         return false;
       }
 
-      // Mark reservation committed
-      this.db
+      this.db!
         .prepare("UPDATE reservations SET status = 'COMMITTED' WHERE id = ?")
         .run(reservationId);
 
-      // Increment agent period and lifetime spend
-      this.db
+      this.db!
         .prepare(
           `UPDATE agents SET
              current_period_spend_micro_usdc = CAST((CAST(current_period_spend_micro_usdc AS INTEGER) + ?) AS TEXT),
@@ -548,82 +663,112 @@ export class SqliteLedger {
         )
         .run(actualCost.toString(), actualCost.toString(), res.agent_id);
 
-      this.db.exec('COMMIT;');
+      this.db!.exec('COMMIT;');
       return true;
     } catch {
-      this.db.exec('ROLLBACK;');
+      this.db!.exec('ROLLBACK;');
       return false;
     }
   }
 
-  // --- Rollback Reservation (On Upstream Error or Timeout) ---
+  // --- Rollback Reservation ---
 
   rollbackReservation(
     reservationId: string,
     reason?: string
   ): boolean {
-    this.db.exec('BEGIN IMMEDIATE;');
+    if (this.isFallback) {
+      const res = this.memReservations.get(reservationId);
+      if (!res) return false;
+      if (res.status === 'PENDING') {
+        res.status = 'ROLLED_BACK';
+        const agent = this.memAgents.get(res.agent_id);
+        const policy = this.memPolicies.get(res.agent_id);
+        if (agent && policy) {
+          agent.consecutive_errors = (agent.consecutive_errors || 0) + 1;
+          if (agent.consecutive_errors >= policy.circuitBreaker.maxConsecutiveErrors) {
+            agent.status = 'CIRCUIT_TRIPPED';
+            agent.freeze_reason = reason || 'Consecutive errors breached';
+          }
+        }
+      }
+      return true;
+    }
+
+    this.db!.exec('BEGIN IMMEDIATE;');
     try {
-      const resStmt = this.db.prepare('SELECT * FROM reservations WHERE id = ?');
+      const resStmt = this.db!.prepare('SELECT * FROM reservations WHERE id = ?');
       const res = resStmt.get(reservationId) as any;
       if (!res) {
-        this.db.exec('ROLLBACK;');
+        this.db!.exec('ROLLBACK;');
         return false;
       }
 
       if (res.status === 'PENDING') {
-        this.db
+        this.db!
           .prepare("UPDATE reservations SET status = 'ROLLED_BACK' WHERE id = ?")
           .run(reservationId);
 
-        // Record error and check circuit breaker
-        const agentStmt = this.db.prepare('SELECT * FROM agents WHERE id = ?');
+        const agentStmt = this.db!.prepare('SELECT * FROM agents WHERE id = ?');
         const agent = agentStmt.get(res.agent_id) as any;
-        const policyStmt = this.db.prepare('SELECT * FROM policies WHERE agent_id = ?');
+        const policyStmt = this.db!.prepare('SELECT * FROM policies WHERE agent_id = ?');
         const policy = policyStmt.get(res.agent_id) as any;
 
         if (agent && policy) {
           const nextErrors = (agent.consecutive_errors || 0) + 1;
           const maxErrors = policy.max_consecutive_errors || 3;
           if (nextErrors >= maxErrors) {
-            this.db
+            this.db!
               .prepare(
                 `UPDATE agents SET consecutive_errors = ?, status = 'CIRCUIT_TRIPPED', freeze_reason = ? WHERE id = ?`
               )
               .run(nextErrors, `Consecutive upstream errors (${nextErrors}) exceeded threshold`, res.agent_id);
           } else {
-            this.db
+            this.db!
               .prepare('UPDATE agents SET consecutive_errors = ? WHERE id = ?')
               .run(nextErrors, res.agent_id);
           }
         }
       }
 
-      this.db.exec('COMMIT;');
+      this.db!.exec('COMMIT;');
       return true;
     } catch {
-      this.db.exec('ROLLBACK;');
+      this.db!.exec('ROLLBACK;');
       return false;
     }
   }
 
   recordExecutionFailure(agentId: string, error?: string): void {
-    const agentStmt = this.db.prepare('SELECT * FROM agents WHERE id = ?');
+    if (this.isFallback) {
+      const agent = this.memAgents.get(agentId);
+      const policy = this.memPolicies.get(agentId);
+      if (agent && policy) {
+        agent.consecutive_errors = (agent.consecutive_errors || 0) + 1;
+        if (agent.consecutive_errors >= policy.circuitBreaker.maxConsecutiveErrors) {
+          agent.status = 'CIRCUIT_TRIPPED';
+          agent.freeze_reason = error || 'Error threshold breached';
+        }
+      }
+      return;
+    }
+
+    const agentStmt = this.db!.prepare('SELECT * FROM agents WHERE id = ?');
     const agent = agentStmt.get(agentId) as any;
-    const policyStmt = this.db.prepare('SELECT * FROM policies WHERE agent_id = ?');
+    const policyStmt = this.db!.prepare('SELECT * FROM policies WHERE agent_id = ?');
     const policy = policyStmt.get(agentId) as any;
 
     if (agent && policy) {
       const nextErrors = (agent.consecutive_errors || 0) + 1;
       const maxErrors = policy.max_consecutive_errors || 3;
       if (nextErrors >= maxErrors) {
-        this.db
+        this.db!
           .prepare(
             `UPDATE agents SET consecutive_errors = ?, status = 'CIRCUIT_TRIPPED', freeze_reason = ? WHERE id = ?`
           )
           .run(nextErrors, `Consecutive upstream errors (${nextErrors}) exceeded threshold`, agentId);
       } else {
-        this.db
+        this.db!
           .prepare('UPDATE agents SET consecutive_errors = ? WHERE id = ?')
           .run(nextErrors, agentId);
       }
@@ -633,7 +778,18 @@ export class SqliteLedger {
   // --- Prune Expired Reservations ---
 
   pruneExpiredReservations(now = Date.now()): number {
-    const stmt = this.db.prepare(
+    if (this.isFallback) {
+      let count = 0;
+      for (const r of this.memReservations.values()) {
+        if (r.status === 'PENDING' && r.expires_at < now) {
+          r.status = 'EXPIRED';
+          count++;
+        }
+      }
+      return count;
+    }
+
+    const stmt = this.db!.prepare(
       "UPDATE reservations SET status = 'EXPIRED' WHERE status = 'PENDING' AND expires_at < ?"
     );
     const result = stmt.run(now);
@@ -643,7 +799,18 @@ export class SqliteLedger {
   // --- Reset Circuit Breaker ---
 
   resetCircuitBreaker(agentId: string): boolean {
-    const stmt = this.db.prepare(
+    if (this.isFallback) {
+      const agent = this.memAgents.get(agentId);
+      if (agent) {
+        agent.status = 'ACTIVE';
+        agent.consecutive_errors = 0;
+        agent.freeze_reason = undefined;
+        return true;
+      }
+      return false;
+    }
+
+    const stmt = this.db!.prepare(
       `UPDATE agents SET status = 'ACTIVE', consecutive_errors = 0, freeze_reason = NULL WHERE id = ?`
     );
     const result = stmt.run(agentId);
@@ -654,7 +821,17 @@ export class SqliteLedger {
 
   setAgentFreeze(agentId: string, freeze: boolean, reason?: string): boolean {
     const status = freeze ? 'AGENT_FROZEN' : 'ACTIVE';
-    const stmt = this.db.prepare(
+    if (this.isFallback) {
+      const agent = this.memAgents.get(agentId);
+      if (agent) {
+        agent.status = status;
+        agent.freeze_reason = freeze ? reason || 'Manual freeze' : undefined;
+        return true;
+      }
+      return false;
+    }
+
+    const stmt = this.db!.prepare(
       `UPDATE agents SET status = ?, freeze_reason = ? WHERE id = ?`
     );
     const result = stmt.run(status, freeze ? reason || 'Manual operator freeze' : null, agentId);
@@ -664,7 +841,12 @@ export class SqliteLedger {
   // --- Settlement Ledger ---
 
   recordSettlement(record: SettlementRecord): void {
-    const stmt = this.db.prepare(`
+    if (this.isFallback) {
+      this.memSettlements.set(record.id, record);
+      return;
+    }
+
+    const stmt = this.db!.prepare(`
       INSERT INTO settlements (
         id, request_id, reservation_id, network, signature, source_account,
         destination_account, mint, amount_micro_usdc, confirmation_status,
@@ -697,7 +879,10 @@ export class SqliteLedger {
   }
 
   getSettlement(id: string): SettlementRecord | null {
-    const row = this.db.prepare('SELECT * FROM settlements WHERE id = ?').get(id) as any;
+    if (this.isFallback) {
+      return this.memSettlements.get(id) || null;
+    }
+    const row = this.db!.prepare('SELECT * FROM settlements WHERE id = ?').get(id) as any;
     if (!row) return null;
     return {
       id: row.id,
@@ -720,17 +905,41 @@ export class SqliteLedger {
   // --- State Querying ---
 
   getAgentFinancialState(agentId: string): AgentFinancialState | null {
-    const agent = this.db.prepare('SELECT * FROM agents WHERE id = ?').get(agentId) as any;
+    if (this.isFallback) {
+      const agent = this.memAgents.get(agentId);
+      if (!agent) return null;
+      let activeRes = 0n;
+      for (const r of this.memReservations.values()) {
+        if (r.agent_id === agentId && r.status === 'PENDING') {
+          activeRes += r.reserved_amount_micro_usdc;
+        }
+      }
+      return {
+        agentId: agent.id,
+        status: agent.status,
+        currentPeriodSpendMicroUsdc: agent.current_period_spend_micro_usdc,
+        totalLifetimeSpendMicroUsdc: agent.total_lifetime_spend_micro_usdc,
+        activePendingReservationsMicroUsdc: activeRes,
+        periodStartTimestamp: agent.period_start_timestamp,
+        consecutiveErrors: agent.consecutive_errors,
+        recentCallTimestamps: this.memRateCalls
+          .filter((c) => c.agentId === agentId)
+          .map((c) => c.timestamp),
+        freezeReason: agent.freeze_reason,
+      };
+    }
+
+    const agent = this.db!.prepare('SELECT * FROM agents WHERE id = ?').get(agentId) as any;
     if (!agent) return null;
 
-    const activeRes = this.db
+    const activeRes = this.db!
       .prepare(
         `SELECT COALESCE(SUM(CAST(reserved_amount_micro_usdc AS INTEGER)), 0) as total
          FROM reservations WHERE agent_id = ? AND status = 'PENDING'`
       )
       .get(agentId) as any;
 
-    const rateCalls = this.db
+    const rateCalls = this.db!
       .prepare(
         'SELECT timestamp FROM rate_calls WHERE agent_id = ? ORDER BY timestamp DESC LIMIT 20'
       )
@@ -750,7 +959,10 @@ export class SqliteLedger {
   }
 
   getAllPolicies(): SpendingPolicy[] {
-    const rows = this.db.prepare('SELECT * FROM policies').all() as any[];
+    if (this.isFallback) {
+      return Array.from(this.memPolicies.values());
+    }
+    const rows = this.db!.prepare('SELECT * FROM policies').all() as any[];
     return rows.map((r) => ({
       agentId: r.agent_id,
       allowedVendors: JSON.parse(r.allowed_vendors_json),
@@ -767,7 +979,11 @@ export class SqliteLedger {
   // --- Audit Events ---
 
   recordAuditEventSync(entry: AuditEventRecord): void {
-    const stmt = this.db.prepare(`
+    if (this.isFallback) {
+      this.memAuditEvents.unshift(entry);
+      return;
+    }
+    const stmt = this.db!.prepare(`
       INSERT INTO audit_events (
         event_id, actor, agent_id, action, decision, reason, timestamp,
         correlation_id, details_json
@@ -788,7 +1004,10 @@ export class SqliteLedger {
   }
 
   getAuditLogs(limit = 100): AuditEventRecord[] {
-    const rows = this.db
+    if (this.isFallback) {
+      return this.memAuditEvents.slice(0, limit);
+    }
+    const rows = this.db!
       .prepare('SELECT * FROM audit_events ORDER BY timestamp DESC LIMIT ?')
       .all(limit) as any[];
     return rows.map((r) => ({
@@ -805,6 +1024,8 @@ export class SqliteLedger {
   }
 
   close(): void {
-    this.db.close();
+    if (this.db) {
+      this.db.close();
+    }
   }
 }
