@@ -233,8 +233,6 @@ export const App: React.FC = () => {
         collapsed={collapsedSidebar}
         onToggleCollapse={() => setCollapsedSidebar(!collapsedSidebar)}
         unreadCount={unreadCount}
-        theme={theme}
-        onToggleTheme={toggleTheme}
       />
 
       {/* Main Workspace Body */}

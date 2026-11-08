@@ -15,8 +15,6 @@ import {
   ChevronDown,
   ChevronsLeft,
   ChevronsRight,
-  Sun,
-  Moon,
 } from 'lucide-react';
 
 export type ScreenId =
@@ -38,8 +36,6 @@ interface SidebarProps {
   collapsed: boolean;
   onToggleCollapse: () => void;
   unreadCount: number;
-  theme: 'dark' | 'light';
-  onToggleTheme: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -48,8 +44,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   collapsed,
   onToggleCollapse,
   unreadCount,
-  theme,
-  onToggleTheme,
 }) => {
   const workspaceItems = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -230,27 +224,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* Theme Switch & User Profile */}
-      <div className="p-3 border-t border-border space-y-2">
-        {/* Black & White Theme Switcher Button (ExpenseVista style) */}
-        <button
-          onClick={onToggleTheme}
-          className={`w-full flex items-center ${
-            collapsed ? 'justify-center' : 'justify-between px-3'
-          } py-1.5 rounded-xl text-xs font-medium bg-card-elevated border border-border text-text-secondary hover:text-text-primary hover:border-border-hover transition`}
-          title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-        >
-          <div className="flex items-center space-x-2">
-            {theme === 'dark' ? <Sun size={14} className="text-amber-400" /> : <Moon size={14} className="text-accent-violet" />}
-            {!collapsed && <span>{theme === 'dark' ? 'Switch to light' : 'Switch to dark'}</span>}
-          </div>
-          {!collapsed && (
-            <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded bg-card text-text-muted border border-border">
-              {theme}
-            </span>
-          )}
-        </button>
-
+      {/* User Profile Footer */}
+      <div className="p-3 border-t border-border">
         {/* Profile Card */}
         <div
           className={`flex items-center ${
