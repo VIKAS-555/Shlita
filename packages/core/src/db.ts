@@ -64,7 +64,7 @@ export class SqliteLedger {
           fs.mkdirSync(dir, { recursive: true });
         }
       }
-      this.db = new NodeDatabaseSync(target);
+      this.db = new NodeDatabaseSync(target, { timeout: 5000 });
       this.initSchema();
     } else {
       this.isFallback = true;

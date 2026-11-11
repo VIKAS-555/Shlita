@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { createGatewayApp } from '../packages/gateway/src/app.js';
 import { createPolicyEngine } from '../packages/core/src/index.js';
 import { canTransition } from '../packages/core/src/lifecycle.js';
@@ -232,7 +234,8 @@ describe('financial ledger integrity', () => {
       ['budget-a', 'budget-b'].map(
         (key) =>
           new Promise<string>((resolve, reject) => {
-            const child = spawn(process.execPath, ['--import', 'tsx', 'tests/workers/claim-once.ts'], {
+            const loader = pathToFileURL(createRequire(import.meta.url).resolve('tsx/esm')).href;
+            const child = spawn(process.execPath, ['--import', loader, path.resolve('tests/workers/claim-once.ts')], {
               cwd: process.cwd(),
               env: {
                 ...process.env,
@@ -242,12 +245,16 @@ describe('financial ledger integrity', () => {
               },
             });
             let out = '';
+            let err = '';
             child.stdout.on('data', (chunk) => {
               out += chunk.toString();
             });
+            child.stderr.on('data', (chunk) => {
+              err += chunk.toString();
+            });
             child.on('error', reject);
             child.on('exit', (code) => {
-              if (code !== 0) reject(new Error(out || `claim worker exited ${code}`));
+              if (code !== 0) reject(new Error(err || out || `claim worker exited ${code}`));
               else resolve(out.trim());
             });
           })
