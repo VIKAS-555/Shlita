@@ -133,6 +133,14 @@ export class PolicyEngine {
     return this.ledger.listReconciliation(ownerOrg);
   }
 
+  claimChainSettlement(input: Parameters<SqliteLedger['claimChainSettlement']>[0]) {
+    return this.ledger.claimChainSettlement(input);
+  }
+
+  noteChainSettlement(operationId: string, patch: Parameters<SqliteLedger['noteChainSettlement']>[1]) {
+    return this.ledger.noteChainSettlement(operationId, patch);
+  }
+
   failNextCommit(): void {
     this.ledger.failNextCommit();
   }

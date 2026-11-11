@@ -11,6 +11,7 @@
     "build": "tsc -b && vite build && (cp -r dist-ui/. dist/ 2>/dev/null || true)",
     "start": "node --import tsx packages/gateway/src/index.ts",
     "test": "vitest run",
+    "test:solana-local": "node scripts/solana-local-settlement.mjs",
     "test:watch": "vitest",
     "demo": "tsx demo/run-demo.ts"
   },

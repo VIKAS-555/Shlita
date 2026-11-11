@@ -37,6 +37,20 @@ jobs:
       - name: Run automated test matrix
         run: npm test
 
+      - name: Record whether funded Solana execution ran
+        run: |
+          set +e
+          npm run test:solana-local
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "Funded local-validator settlement executed."
+          elif [ "$status" -eq 2 ]; then
+            echo "Funded local-validator settlement: BLOCKED. npm test did not move tokens."
+          else
+            exit "$status"
+          fi
+
       - name: Build TypeScript Project & Web Application
         run: npm run build
 

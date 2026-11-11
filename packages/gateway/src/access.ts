@@ -30,6 +30,9 @@ export interface GatewaySecurityOptions {
    * The gateway calls this at most once per idempotency key.
    */
   upstream?: (exchange: UpstreamExchange) => Promise<{ status: number; body: unknown }>;
+  /** Public treasury address allowed to receive settlement. Client-supplied addresses are rejected. */
+  settlementDestination?: string;
+  settlementEnabled?: boolean;
 }
 
 export interface AgentPrincipal {
