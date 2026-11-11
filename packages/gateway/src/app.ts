@@ -5,6 +5,15 @@ import { SolanaSettlementManager } from '../../solana/src/settlement.js';
 import { TransactionLifecycleState } from '../../core/src/types.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  applyCors,
+  assertMatchingAgent,
+  GatewaySecurityOptions,
+  readJsonObject,
+  resolveAgentPrincipal,
+  resolveOperator,
+  simulationRequested,
+} from './access.js';
 
 export interface ProviderDefinition {
   id: string;
@@ -154,18 +163,54 @@ export function validateVendorDestination(
   }
 }
 
+function enforceProviderRoute(
+  host: string,
+  method: string,
+  reqPath: string
+):
+  | { ok: true; method: string }
+  | { ok: false; status: 403 | 405; error: string; message: string } {
+  const normalized = method.trim().toUpperCase();
+  if (!/^[A-Z]{1,16}$/.test(normalized)) {
+    return { ok: false, status: 405, error: 'METHOD_NOT_ALLOWED', message: 'Unsupported request method.' };
+  }
+
+  const provider = PROVIDER_DEFINITIONS[host];
+  if (provider) {
+    if (!provider.allowedMethods.includes(normalized)) {
+      return { ok: false, status: 405, error: 'METHOD_NOT_ALLOWED', message: 'Unsupported request method.' };
+    }
+    const pathAllowed = provider.allowedPathPrefixes.some(
+      (prefix) => reqPath === prefix || reqPath.startsWith(`${prefix}/`)
+    );
+    if (!pathAllowed) {
+      return {
+        ok: false,
+        status: 403,
+        error: 'PATH_NOT_ALLOWED',
+        message: 'Destination path is not permitted for this provider.',
+      };
+    }
+  } else if (!['GET', 'HEAD', 'POST'].includes(normalized)) {
+    return { ok: false, status: 405, error: 'METHOD_NOT_ALLOWED', message: 'Unsupported request method.' };
+  }
+
+  return { ok: true, method: normalized };
+}
+
 export function createGatewayApp(
   engine: PolicyEngine,
-  settlementManager?: SolanaSettlementManager
+  settlementManager?: SolanaSettlementManager,
+  security: GatewaySecurityOptions = {}
 ) {
   const app = new Hono();
-  const operatorKey = process.env.SHLITA_OPERATOR_KEY || 'shlt_operator_master';
+  const operators = security.operators ?? [];
+  const allowSimulation = security.allowSimulation === true;
+  const corsOrigins = security.corsOrigins ?? [];
+  const maxJsonBytes = security.maxJsonBytes ?? 65_536;
 
-  // Middleware for CORS and logging
   app.use('*', async (c, next) => {
-    c.header('Access-Control-Allow-Origin', '*');
-    c.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-shlita-api-key, x-shlita-simulation, x-shlita-operator-key');
+    applyCors((name, value) => c.header(name, value), c.req.header('origin'), corsOrigins);
     if (c.req.method === 'OPTIONS') {
       return c.body(null, 204);
     }
@@ -186,7 +231,9 @@ export function createGatewayApp(
 
   // Real Proxy endpoint for AI Agent outbound requests
   app.post('/v1/proxy', async (c) => {
-    const rawBody = await c.req.json().catch(() => ({}));
+    const parsed = await readJsonObject(c.req.raw, maxJsonBytes);
+    if (!parsed.ok) return c.json(parsed.body, parsed.status);
+    const rawBody = parsed.value;
     const {
       agentId: rawAgentId,
       vendor,
@@ -195,36 +242,41 @@ export function createGatewayApp(
       path: reqPath = '/',
       body: clientBody,
       payload: legacyPayload,
-      simulate = false,
       idempotencyKey,
-    } = rawBody;
+    } = rawBody as {
+      agentId?: unknown;
+      vendor?: string;
+      estimatedCostMicroUsdc?: string | number;
+      method?: string;
+      path?: string;
+      body?: unknown;
+      payload?: unknown;
+      idempotencyKey?: string;
+    };
 
     const requestPayload = clientBody ?? legacyPayload;
     const now = Date.now();
 
-    // 1. Agent Authentication
-    const authHeader = c.req.header('Authorization');
-    const apiKeyHeader = c.req.header('x-shlita-api-key');
-    const token = apiKeyHeader || authHeader;
-    let resolvedAgentId = rawAgentId;
+    const principal = resolveAgentPrincipal(c.req, (token) => engine.authenticateApiKey(token));
+    if (!principal.ok) return c.json(principal.body, principal.status);
 
-    if (token) {
-      const authResult = engine.authenticateApiKey(token);
-      if (authResult) {
-        resolvedAgentId = authResult.agentId;
-      }
-    }
+    const identity = assertMatchingAgent(rawAgentId, principal.principal.agentId);
+    if (!identity.ok) return c.json(identity.body, identity.status);
+    const resolvedAgentId = identity.agentId;
 
-    if (!resolvedAgentId) {
+    if (simulationRequested(rawBody, c.req.header('x-shlita-simulation')) && !allowSimulation) {
       return c.json(
         {
           allowed: false,
-          error: 'UNAUTHORIZED',
-          message: 'Missing or invalid agent credentials. Provide x-shlita-api-key or Authorization Bearer header.',
-          timestamp: now,
+          error: 'SIMULATION_DISABLED',
+          message: 'Simulation is disabled.',
         },
-        401
+        403
       );
+    }
+
+    if (typeof vendor !== 'string' || !vendor.trim() || typeof reqPath !== 'string') {
+      return c.json({ allowed: false, error: 'BAD_REQUEST', message: 'Invalid request.' }, 400);
     }
 
     const policy = engine.getAllPolicies().find((p) => p.agentId === resolvedAgentId);
@@ -249,9 +301,18 @@ export function createGatewayApp(
           message: destValidation.error,
           timestamp: now,
         },
-        403
+      403
+    );
+    }
+
+    const routeCheck = enforceProviderRoute(destValidation.host!, String(method), reqPath);
+    if (!routeCheck.ok) {
+      return c.json(
+        { allowed: false, error: routeCheck.error, message: routeCheck.message },
+        routeCheck.status
       );
     }
+    const upstreamMethod = routeCheck.method;
 
     // 3. Server-Side Pricing & Tariffs
     const providerDef = PROVIDER_DEFINITIONS[vendor.toLowerCase()];
@@ -292,8 +353,7 @@ export function createGatewayApp(
     const startMs = performance.now();
 
     // 5. Explicit Simulation Flag (NEVER auto-simulate based on vendor name!)
-    const isExplicitSimulation =
-      simulate === true || c.req.header('x-shlita-simulation') === 'true';
+    const isExplicitSimulation = allowSimulation && simulationRequested(rawBody, c.req.header('x-shlita-simulation'));
 
     let actualCostMicroUsdc = serverTariff;
 
@@ -312,7 +372,13 @@ export function createGatewayApp(
         };
       } else if (vendor.includes('tavily')) {
         responseData = {
-          query: requestPayload?.query || 'Solana Subscriptions Protocol',
+          query:
+            requestPayload &&
+            typeof requestPayload === 'object' &&
+            'query' in requestPayload &&
+            typeof requestPayload.query === 'string'
+              ? requestPayload.query
+              : 'Solana Subscriptions Protocol',
           results: [
             { title: 'Official Solana Subscriptions & Allowances Program', score: 0.99 },
             { title: 'Autonomous AI Agent Micro-Settlements on Solana', score: 0.96 },
@@ -343,10 +409,10 @@ export function createGatewayApp(
         }
 
         const upstreamRes = await fetch(fetchUrl, {
-          method,
+          method: upstreamMethod,
           headers: upstreamHeaders,
           body:
-            method !== 'GET' && method !== 'HEAD' && requestPayload
+            upstreamMethod !== 'GET' && upstreamMethod !== 'HEAD' && requestPayload
               ? JSON.stringify(requestPayload)
               : undefined,
           redirect: 'manual', // Prevent redirect-based SSRF hops
@@ -430,9 +496,55 @@ export function createGatewayApp(
     });
   });
 
+  function auditPrivileged(
+    agentId: string,
+    action: string,
+    decision: 'ALLOWED' | 'BLOCKED',
+    actor: string,
+    reason?: string
+  ) {
+    engine.recordPrivilegedAudit({ actor, agentId, action, decision, reason });
+  }
+
+  function requireOwnedAgent(c: { req: { header(name: string): string | undefined; param(name: string): string } }, action: string) {
+    const agentId = c.req.param('id');
+    const operator = resolveOperator(c.req, operators);
+    if (!operator.ok) {
+      auditPrivileged(agentId, action, 'BLOCKED', 'anonymous', operator.status === 401 ? 'OPERATOR_AUTH_REQUIRED' : 'OPERATOR_FORBIDDEN');
+      return {
+        ok: false as const,
+        status: operator.status,
+        body:
+          operator.status === 401
+            ? { error: 'UNAUTHORIZED', message: 'Authentication required.' }
+            : { error: 'FORBIDDEN', message: 'Forbidden.' },
+      };
+    }
+    const ownerOrg = engine.getAgentOwnerOrg(agentId);
+    if (!ownerOrg || ownerOrg !== operator.ownerOrg) {
+      auditPrivileged(agentId, action, 'BLOCKED', `operator:${operator.ownerOrg}`, 'OPERATOR_FORBIDDEN');
+      return {
+        ok: false as const,
+        status: 403 as const,
+        body: { error: 'FORBIDDEN', message: 'Forbidden.' },
+      };
+    }
+    return { ok: true as const, agentId, ownerOrg: operator.ownerOrg };
+  }
+
   // Get all registered agents, policies, and live financial metrics
   app.get('/v1/agents', (c) => {
-    const policies = engine.getAllPolicies();
+    const operator = resolveOperator(c.req, operators);
+    if (!operator.ok) {
+      auditPrivileged('*', 'list-agents', 'BLOCKED', 'anonymous', 'OPERATOR_AUTH_REQUIRED');
+      return c.json(
+        operator.status === 401
+          ? { error: 'UNAUTHORIZED', message: 'Authentication required.' }
+          : { error: 'FORBIDDEN', message: 'Forbidden.' },
+        operator.status
+      );
+    }
+    const policies = engine.getAllPolicies().filter((policy) => engine.getAgentOwnerOrg(policy.agentId) === operator.ownerOrg);
     const states = engine.getAllStates();
 
     const agents = policies.map((policy) => {
@@ -467,37 +579,72 @@ export function createGatewayApp(
     return c.json({ agents });
   });
 
-  // Emergency Freeze (Operator RBAC)
+  // Emergency Freeze (operator, organization scoped)
   app.post('/v1/agents/:id/freeze', async (c) => {
-    const agentId = c.req.param('id');
-    const body = await c.req.json().catch(() => ({}));
-    engine.freezeAgent(agentId, body.reason || 'Manual operator freeze');
-    return c.json({ success: true, agentId, status: 'AGENT_FROZEN' });
+    const parsed = await readJsonObject(c.req.raw, maxJsonBytes);
+    if (!parsed.ok) return c.json(parsed.body, parsed.status);
+    const gate = requireOwnedAgent(c, 'freeze');
+    if (!gate.ok) return c.json(gate.body, gate.status);
+    const reason = typeof parsed.value.reason === 'string' ? parsed.value.reason.slice(0, 200) : 'Manual operator freeze';
+    engine.freezeAgent(gate.agentId, reason);
+    auditPrivileged(gate.agentId, 'freeze', 'ALLOWED', `operator:${gate.ownerOrg}`);
+    return c.json({ success: true, agentId: gate.agentId, status: 'AGENT_FROZEN' });
   });
 
-  // Unfreeze (Operator RBAC)
-  app.post('/v1/agents/:id/unfreeze', (c) => {
-    const agentId = c.req.param('id');
-    engine.unfreezeAgent(agentId);
-    return c.json({ success: true, agentId, status: 'ACTIVE' });
+  // Unfreeze (operator, organization scoped)
+  app.post('/v1/agents/:id/unfreeze', async (c) => {
+    const parsed = await readJsonObject(c.req.raw, maxJsonBytes);
+    if (!parsed.ok) return c.json(parsed.body, parsed.status);
+    const gate = requireOwnedAgent(c, 'unfreeze');
+    if (!gate.ok) return c.json(gate.body, gate.status);
+    engine.unfreezeAgent(gate.agentId);
+    auditPrivileged(gate.agentId, 'unfreeze', 'ALLOWED', `operator:${gate.ownerOrg}`);
+    return c.json({ success: true, agentId: gate.agentId, status: 'ACTIVE' });
   });
 
-  // Reset Circuit Breaker (Operator RBAC)
-  app.post('/v1/agents/:id/reset-circuit', (c) => {
-    const agentId = c.req.param('id');
-    engine.resetCircuitBreaker(agentId);
-    return c.json({ success: true, agentId, status: 'ACTIVE' });
+  // Reset Circuit Breaker (operator, organization scoped)
+  app.post('/v1/agents/:id/reset-circuit', async (c) => {
+    const parsed = await readJsonObject(c.req.raw, maxJsonBytes);
+    if (!parsed.ok) return c.json(parsed.body, parsed.status);
+    const gate = requireOwnedAgent(c, 'reset-circuit');
+    if (!gate.ok) return c.json(gate.body, gate.status);
+    engine.resetCircuitBreaker(gate.agentId);
+    auditPrivileged(gate.agentId, 'reset-circuit', 'ALLOWED', `operator:${gate.ownerOrg}`);
+    return c.json({ success: true, agentId: gate.agentId, status: 'ACTIVE' });
   });
 
   // Audit Logs & Active Reservations
   app.get('/v1/audit', (c) => {
-    const logs = engine.getAuditLogs();
+    const operator = resolveOperator(c.req, operators);
+    if (!operator.ok) {
+      auditPrivileged('*', 'read-audit', 'BLOCKED', 'anonymous', operator.status === 401 ? 'OPERATOR_AUTH_REQUIRED' : 'OPERATOR_FORBIDDEN');
+      return c.json(
+        operator.status === 401
+          ? { error: 'UNAUTHORIZED', message: 'Authentication required.' }
+          : { error: 'FORBIDDEN', message: 'Forbidden.' },
+        operator.status
+      );
+    }
+    const logs = engine.getAuditLogs().filter((entry) => engine.getAgentOwnerOrg(entry.agentId) === operator.ownerOrg);
     return c.json({ logs });
   });
 
   // Live Telemetry Stream Feed
   app.get('/v1/telemetry', (c) => {
-    const logs = engine.getAuditLogs().slice(0, 50);
+    const operator = resolveOperator(c.req, operators);
+    if (!operator.ok) {
+      auditPrivileged('*', 'read-telemetry', 'BLOCKED', 'anonymous', operator.status === 401 ? 'OPERATOR_AUTH_REQUIRED' : 'OPERATOR_FORBIDDEN');
+      return c.json(
+        operator.status === 401
+          ? { error: 'UNAUTHORIZED', message: 'Authentication required.' }
+          : { error: 'FORBIDDEN', message: 'Forbidden.' },
+        operator.status
+      );
+    }
+    const logs = engine
+      .getAuditLogs()
+      .filter((entry) => engine.getAgentOwnerOrg(entry.agentId) === operator.ownerOrg)
+      .slice(0, 50);
     return c.json({
       events: logs.map((l) => ({
         id: l.id,

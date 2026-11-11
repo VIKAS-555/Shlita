@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -12,7 +13,9 @@ permissions:
   id-token: write
 
 concurrency:
-  group: 'pages'
+  # A run that never receives jobs stays "queued" forever and cannot be
+  # cancelled. One shared group would pin every later run behind it.
+  group: pages-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -43,6 +46,7 @@ jobs:
           path: './dist-ui'
 
   deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

@@ -30,7 +30,7 @@ export const DeveloperScreen: React.FC<DeveloperScreenProps> = ({ agents = [], o
   const [sandboxResponse, setSandboxResponse] = useState<any>(null);
   const [isRunningSandbox, setIsRunningSandbox] = useState(false);
 
-  const apiKey = 'shlt_live_79f939b4e18ac89a42ff9041280bce42';
+  const apiKey = 'shlt_example_not_a_secret';
 
   const snippets = {
     curl: `curl -X POST https://api.shlita.finance/v1/proxy \\

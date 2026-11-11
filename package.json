@@ -8,7 +8,7 @@
     "dev": "vite",
     "dev:ui": "vite",
     "build:ui": "vite build && cp -r dist-ui/. dist/ 2>/dev/null || true",
-    "build": "tsc -b && vite build && cp -r dist-ui/. dist/ 2>/dev/null || true",
+    "build": "tsc -b && vite build && (cp -r dist-ui/. dist/ 2>/dev/null || true)",
     "start": "node --import tsx packages/gateway/src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",

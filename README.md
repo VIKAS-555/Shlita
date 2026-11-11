@@ -150,6 +150,8 @@ npm start
 ```
 Open [http://localhost:4000](http://localhost:4000) to view the live dashboard.
 
+Development startup without `SHLITA_OPERATOR_KEY` generates a local operator key under `.shlita/` and does not print it. Production (`SHLITA_ENV=production`) refuses to start unless `.env.example` is copied to `.env` and the placeholders are replaced with strong values. Demo agent enrollment runs only when `SHLITA_SEED_DEMO=true` outside production. Simulation runs only when `SHLITA_ALLOW_SIMULATION=true` outside production.
+
 ---
 
 ## 6. Integration Example (Agent SDK)
@@ -159,7 +161,7 @@ Open [http://localhost:4000](http://localhost:4000) to view the live dashboard.
 import { ShlitaClient } from 'shlita';
 
 const client = new ShlitaClient({
-  apiKey: process.env.SHLITA_API_KEY, // e.g. shlt_live_sentinel_dev_01
+  apiKey: process.env.SHLITA_API_KEY,
   baseUrl: 'http://localhost:4000',
 });
 
@@ -178,7 +180,7 @@ console.log('Policy Approved & Forwarded:', response.data);
 ### cURL
 ```bash
 curl -X POST http://localhost:4000/v1/proxy \
-  -H "x-shlita-api-key: shlt_live_sentinel_dev_01" \
+  -H "x-shlita-api-key: $SHLITA_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "agentId": "agent-sentinel-01",
