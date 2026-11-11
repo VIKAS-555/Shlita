@@ -13,11 +13,23 @@ export interface OperatorCredential {
   ownerOrg: string;
 }
 
+export interface UpstreamExchange {
+  url: string;
+  method: string;
+  body?: unknown;
+  timeoutMs: number;
+}
+
 export interface GatewaySecurityOptions {
   operators?: OperatorCredential[];
   allowSimulation?: boolean;
   corsOrigins?: string[];
   maxJsonBytes?: number;
+  /**
+   * Test seam for the upstream call. Production uses fetch.
+   * The gateway calls this at most once per idempotency key.
+   */
+  upstream?: (exchange: UpstreamExchange) => Promise<{ status: number; body: unknown }>;
 }
 
 export interface AgentPrincipal {

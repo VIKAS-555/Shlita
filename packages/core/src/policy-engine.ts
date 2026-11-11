@@ -14,8 +14,8 @@ export class PolicyEngine {
   private ledger: SqliteLedger;
   private lastReservationByAgent = new Map<string, string>(); // agentId -> reservationId
 
-  constructor(dbPath: string = ':memory:') {
-    this.ledger = new SqliteLedger({ dbPath });
+  constructor(dbPath: string = ':memory:', options: { requirePersistent?: boolean } = {}) {
+    this.ledger = new SqliteLedger({ dbPath, requirePersistent: options.requirePersistent });
   }
 
   public getLedger(): SqliteLedger {
@@ -117,6 +117,26 @@ export class PolicyEngine {
     return this.ledger.commitReservation(reservationId, actualCostMicroUsdc);
   }
 
+  claimExecution(input: Parameters<SqliteLedger['claimExecution']>[0]) {
+    return this.ledger.claimExecution(input);
+  }
+
+  finishExecution(operationId: string, outcome: Parameters<SqliteLedger['finishExecution']>[1]) {
+    return this.ledger.finishExecution(operationId, outcome);
+  }
+
+  recoverInFlightOperations(now = Date.now()): number {
+    return this.ledger.recoverInFlightOperations(now);
+  }
+
+  listReconciliation(ownerOrg: string) {
+    return this.ledger.listReconciliation(ownerOrg);
+  }
+
+  failNextCommit(): void {
+    this.ledger.failNextCommit();
+  }
+
   /**
    * Two-phase rollback: Releases funds held by a pending reservation on failure.
    */
@@ -197,11 +217,14 @@ export class PolicyEngine {
         actor: r.actor,
         action: r.action,
         vendor: details.vendor || 'solana-network',
-        estimatedCostMicroUsdc: details.estimatedCost || details.reservedAmountMicroUsdc || '0',
-        actualCostMicroUsdc: details.actualCost,
+        estimatedCostMicroUsdc: details.estimatedCostMicroUsdc || details.estimatedCost || details.reservedAmountMicroUsdc || '0',
+        actualCostMicroUsdc: details.actualCostMicroUsdc ?? details.actualCost,
         decision: r.decision as 'ALLOWED' | 'BLOCKED',
         reason: r.reason as any,
         reservationId: details.reservationId,
+        correlationId: r.correlationId,
+        lifecycleState: details.lifecycleState,
+        metadata: details,
       };
     });
   }
@@ -211,6 +234,9 @@ export class PolicyEngine {
   }
 }
 
-export function createPolicyEngine(dbPath: string = ':memory:'): PolicyEngine {
-  return new PolicyEngine(dbPath);
+export function createPolicyEngine(
+  dbPath: string = ':memory:',
+  options: { requirePersistent?: boolean } = {}
+): PolicyEngine {
+  return new PolicyEngine(dbPath, options);
 }

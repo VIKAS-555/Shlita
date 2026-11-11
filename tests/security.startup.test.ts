@@ -126,7 +126,7 @@ describe('gateway process startup', () => {
       const invalid = await fetch(`http://127.0.0.1:${port}/v1/proxy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-shlita-api-key': 'shlt_test_not_a_real_key' },
-        body: JSON.stringify({ vendor: 'api.helius.xyz', path: '/v0/token-metadata', simulate: true }),
+        body: JSON.stringify({ vendor: 'api.helius.xyz', path: '/v0/token-metadata', simulate: true, idempotencyKey: 'startup-invalid-key-01' }),
       });
       expect(invalid.status).toBe(401);
 
@@ -142,6 +142,7 @@ describe('gateway process startup', () => {
           vendor: 'api.helius.xyz',
           path: '/v0/token-metadata',
           simulate: true,
+          idempotencyKey: 'startup-allow-01',
         }),
       });
       expect(proxy.status).toBe(200);
@@ -179,6 +180,7 @@ describe('gateway process startup', () => {
           vendor: 'api.helius.xyz',
           path: '/v0/token-metadata',
           simulate: true,
+          idempotencyKey: 'startup-frozen-01',
         }),
       });
       expect(proxy.status).toBe(403);
