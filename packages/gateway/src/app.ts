@@ -163,6 +163,41 @@ export function validateVendorDestination(
   }
 }
 
+function enforceProviderRoute(
+  host: string,
+  method: string,
+  reqPath: string
+):
+  | { ok: true; method: string }
+  | { ok: false; status: 403 | 405; error: string; message: string } {
+  const normalized = method.trim().toUpperCase();
+  if (!/^[A-Z]{1,16}$/.test(normalized)) {
+    return { ok: false, status: 405, error: 'METHOD_NOT_ALLOWED', message: 'Unsupported request method.' };
+  }
+
+  const provider = PROVIDER_DEFINITIONS[host];
+  if (provider) {
+    if (!provider.allowedMethods.includes(normalized)) {
+      return { ok: false, status: 405, error: 'METHOD_NOT_ALLOWED', message: 'Unsupported request method.' };
+    }
+    const pathAllowed = provider.allowedPathPrefixes.some(
+      (prefix) => reqPath === prefix || reqPath.startsWith(`${prefix}/`)
+    );
+    if (!pathAllowed) {
+      return {
+        ok: false,
+        status: 403,
+        error: 'PATH_NOT_ALLOWED',
+        message: 'Destination path is not permitted for this provider.',
+      };
+    }
+  } else if (!['GET', 'HEAD', 'POST'].includes(normalized)) {
+    return { ok: false, status: 405, error: 'METHOD_NOT_ALLOWED', message: 'Unsupported request method.' };
+  }
+
+  return { ok: true, method: normalized };
+}
+
 export function createGatewayApp(
   engine: PolicyEngine,
   settlementManager?: SolanaSettlementManager,
@@ -266,9 +301,18 @@ export function createGatewayApp(
           message: destValidation.error,
           timestamp: now,
         },
-        403
+      403
+    );
+    }
+
+    const routeCheck = enforceProviderRoute(destValidation.host!, String(method), reqPath);
+    if (!routeCheck.ok) {
+      return c.json(
+        { allowed: false, error: routeCheck.error, message: routeCheck.message },
+        routeCheck.status
       );
     }
+    const upstreamMethod = routeCheck.method;
 
     // 3. Server-Side Pricing & Tariffs
     const providerDef = PROVIDER_DEFINITIONS[vendor.toLowerCase()];
@@ -365,10 +409,10 @@ export function createGatewayApp(
         }
 
         const upstreamRes = await fetch(fetchUrl, {
-          method,
+          method: upstreamMethod,
           headers: upstreamHeaders,
           body:
-            method !== 'GET' && method !== 'HEAD' && requestPayload
+            upstreamMethod !== 'GET' && upstreamMethod !== 'HEAD' && requestPayload
               ? JSON.stringify(requestPayload)
               : undefined,
           redirect: 'manual', // Prevent redirect-based SSRF hops

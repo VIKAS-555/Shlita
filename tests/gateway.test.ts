@@ -101,6 +101,7 @@ describe('Shlita Gateway HTTP Seam', () => {
       body: JSON.stringify({
         agentId: 'agent-sentinel-01',
         vendor: 'api.helius.xyz',
+        path: '/v0/token-metadata',
         estimatedCostMicroUsdc: '10000',
         simulate: true,
       }),

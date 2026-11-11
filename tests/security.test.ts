@@ -326,6 +326,50 @@ describe('Shlita security foundation', () => {
     expect(engine.getAgentState('agent-sentinel-01').currentPeriodSpendMicroUsdc).toBe(0n);
   });
 
+  it('rejects an empty credential, a short Bearer token, and a provider method or path that is not allowed', async () => {
+    const empty = await app.request('/v1/proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-shlita-api-key': '   ' },
+      body: proxyBody('agent-sentinel-01'),
+    });
+    expect(empty.status).toBe(401);
+
+    const shortBearer = await app.request('/v1/proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer x' },
+      body: proxyBody('agent-sentinel-01'),
+    });
+    expect(shortBearer.status).toBe(401);
+
+    const method = await app.request('/v1/proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-shlita-api-key': AGENT_KEY },
+      body: JSON.stringify({
+        agentId: 'agent-sentinel-01',
+        vendor: 'api.helius.xyz',
+        method: 'DELETE',
+        path: '/v0/token-metadata',
+        simulate: true,
+      }),
+    });
+    expect(method.status).toBe(405);
+
+    const path = await app.request('/v1/proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-shlita-api-key': AGENT_KEY },
+      body: JSON.stringify({
+        agentId: 'agent-sentinel-01',
+        vendor: 'api.helius.xyz',
+        method: 'POST',
+        path: '/admin/keys',
+        simulate: true,
+      }),
+    });
+    expect(path.status).toBe(403);
+    expect((await path.json()).error).toBe('PATH_NOT_ALLOWED');
+    expect(engine.getAgentState('agent-sentinel-01').currentPeriodSpendMicroUsdc).toBe(0n);
+  });
+
   it('keeps an existing agent key valid across restart until it is rotated', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shlita-ledger-'));
     const dbPath = path.join(dir, 'ledger.db');

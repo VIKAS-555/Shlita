@@ -36,7 +36,7 @@ async function runDemo() {
 
   const app = createGatewayApp(engine, undefined, { allowSimulation: true });
 
-  const callGateway = async (vendor: string, costMicroUsdc: string, requestPath = '/v1/query') => {
+  const callGateway = async (vendor: string, costMicroUsdc: string, requestPath = '/v0/token-metadata') => {
     const res = await app.request('/v1/proxy', {
       method: 'POST',
       headers: {
@@ -92,7 +92,7 @@ async function runDemo() {
   console.log(`Simulating rapid recursive tool invocation (>6 calls in seconds)...`);
 
   for (let i = 1; i <= 6; i++) {
-    const loopRes = await callGateway('api.helius.xyz', '5000', `/retry-${i}`);
+    const loopRes = await callGateway('api.helius.xyz', '5000', `/v0/retry-${i}`);
     if (loopRes.status === 200) {
       console.log(`  -> Loop call ${i}: Executed ($0.005 USDC)`);
     } else {

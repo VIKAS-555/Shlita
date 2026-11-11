@@ -161,7 +161,7 @@ Development startup without `SHLITA_OPERATOR_KEY` generates a local operator key
 import { ShlitaClient } from 'shlita';
 
 const client = new ShlitaClient({
-  apiKey: process.env.SHLITA_API_KEY, // e.g. shlt_live_sentinel_dev_01
+  apiKey: process.env.SHLITA_API_KEY,
   baseUrl: 'http://localhost:4000',
 });
 
@@ -180,7 +180,7 @@ console.log('Policy Approved & Forwarded:', response.data);
 ### cURL
 ```bash
 curl -X POST http://localhost:4000/v1/proxy \
-  -H "x-shlita-api-key: shlt_live_sentinel_dev_01" \
+  -H "x-shlita-api-key: $SHLITA_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "agentId": "agent-sentinel-01",
