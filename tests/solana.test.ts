@@ -66,6 +66,13 @@ describe('Solana settlement construction', () => {
     expect(() => new SolanaSettlementManager('https://api.mainnet-beta.solana.com', undefined, true)).toThrow(/Mainnet/);
   });
 
+  it('uses a configured local mint instead of the devnet USDC address', () => {
+    const localMint = Keypair.generate().publicKey;
+    const manager = new SolanaSettlementManager('http://127.0.0.1:8899', undefined, false, undefined, localMint);
+    expect(manager.getUsdcMint().equals(localMint)).toBe(true);
+    expect(manager.getUsdcMint().equals(USDC_MINT_DEVNET)).toBe(false);
+  });
+
   it('does not broadcast when the signer is not the delegatee', async () => {
     let calls = 0;
     const connection = {
