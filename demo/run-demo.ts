@@ -19,29 +19,37 @@ async function runDemo() {
 
   // Register Autonomous Research Agent with strict spending parameters
   const agentId = 'agent-researcher-01';
-  engine.registerAgent({
-    agentId,
-    allowedVendors: ['api.helius.xyz', 'api.tavily.com'],
-    maxPerCallMicroUsdc: 50_000n, // $0.05 USDC cap per call
-    periodBudgetMicroUsdc: 150_000n, // $0.15 USDC total budget
-    periodSeconds: 3600,
-    circuitBreaker: {
-      maxConsecutiveErrors: 2,
-      maxCallsPerMinute: 6,
+  const enrolled = engine.registerAgent(
+    {
+      agentId,
+      allowedVendors: ['api.helius.xyz', 'api.tavily.com'],
+      maxPerCallMicroUsdc: 50_000n, // $0.05 USDC cap per call
+      periodBudgetMicroUsdc: 150_000n, // $0.15 USDC total budget
+      periodSeconds: 3600,
+      circuitBreaker: {
+        maxConsecutiveErrors: 2,
+        maxCallsPerMinute: 6,
+      },
     },
-  });
+    { ownerOrg: 'org-demo' }
+  );
 
-  const app = createGatewayApp(engine);
+  const app = createGatewayApp(engine, undefined, { allowSimulation: true });
 
-  const callGateway = async (vendor: string, costMicroUsdc: string, path = '/v1/query') => {
+  const callGateway = async (vendor: string, costMicroUsdc: string, requestPath = '/v1/query') => {
     const res = await app.request('/v1/proxy', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-shlita-api-key': enrolled.apiKey,
+        'x-shlita-simulation': 'true',
+      },
       body: JSON.stringify({
         agentId,
         vendor,
         estimatedCostMicroUsdc: costMicroUsdc,
-        path,
+        path: requestPath,
+        simulate: true,
       }),
     });
     return { status: res.status, data: await res.json() };

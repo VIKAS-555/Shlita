@@ -1,5 +1,6 @@
 export interface ShlitaClientOptions {
   apiKey: string;
+  operatorKey?: string;
   baseUrl?: string;
   timeoutMs?: number;
 }
@@ -23,6 +24,7 @@ export interface ProxyResponse<T = any> {
 
 export class ShlitaClient {
   private apiKey: string;
+  private operatorKey?: string;
   private baseUrl: string;
   private timeoutMs: number;
 
@@ -31,6 +33,7 @@ export class ShlitaClient {
       throw new Error('ShlitaClient requires a valid apiKey.');
     }
     this.apiKey = options.apiKey;
+    this.operatorKey = options.operatorKey;
     this.baseUrl = (options.baseUrl || 'http://localhost:4000').replace(/\/+$/, '');
     this.timeoutMs = options.timeoutMs ?? 15000;
   }
@@ -72,7 +75,7 @@ export class ShlitaClient {
    * Checks the live health of the Shlita policy gateway.
    */
   async getHealth(): Promise<{ status: string; uptimeSeconds: number; version: string }> {
-    const res = await fetch(`${this.baseUrl}/v1/health`, {
+    const res = await fetch(`${this.baseUrl}/health`, {
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     return res.json();
@@ -84,10 +87,7 @@ export class ShlitaClient {
   async freeze(agentId: string, reason = 'Operator Kill-Switch'): Promise<any> {
     const res = await fetch(`${this.baseUrl}/v1/agents/${encodeURIComponent(agentId)}/freeze`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-shlita-api-key': this.apiKey,
-      },
+      headers: this.operatorHeaders(),
       body: JSON.stringify({ reason }),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
@@ -100,12 +100,17 @@ export class ShlitaClient {
   async unfreeze(agentId: string): Promise<any> {
     const res = await fetch(`${this.baseUrl}/v1/agents/${encodeURIComponent(agentId)}/unfreeze`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-shlita-api-key': this.apiKey,
-      },
+      headers: this.operatorHeaders(),
+      body: JSON.stringify({}),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     return res.json();
+  }
+
+  private operatorHeaders(): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      ...(this.operatorKey ? { 'x-shlita-operator-key': this.operatorKey } : {}),
+    };
   }
 }

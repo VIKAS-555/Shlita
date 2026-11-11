@@ -75,9 +75,12 @@ export class SqliteLedger {
         period_start_timestamp INTEGER NOT NULL,
         current_period_spend_micro_usdc TEXT NOT NULL DEFAULT '0',
         total_lifetime_spend_micro_usdc TEXT NOT NULL DEFAULT '0',
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        api_key_revoked INTEGER NOT NULL DEFAULT 0,
+        api_key_expires_at INTEGER
       );
     `);
+    this.ensureAgentCredentialColumns();
 
     // 2. Policies Table
     this.db.exec(`
@@ -175,74 +178,86 @@ export class SqliteLedger {
     `);
   }
 
+  private ensureAgentCredentialColumns(): void {
+    if (!this.db) return;
+    const columns = this.db.prepare('PRAGMA table_info(agents)').all() as Array<{ name: string }>;
+    const names = new Set(columns.map((column) => column.name));
+    if (!names.has('api_key_revoked')) {
+      this.db.exec('ALTER TABLE agents ADD COLUMN api_key_revoked INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!names.has('api_key_expires_at')) {
+      this.db.exec('ALTER TABLE agents ADD COLUMN api_key_expires_at INTEGER');
+    }
+  }
+
   // --- Agent & Policy Registration ---
 
   registerAgent(
     policy: SpendingPolicy,
-    options: { ownerOrg?: string; rawApiKey?: string; apiKeyHash?: string } = {}
+    options: {
+      ownerOrg?: string;
+      rawApiKey?: string;
+      apiKeyHash?: string;
+      rotateKey?: boolean;
+      expiresAt?: number | null;
+    } = {}
   ): { apiKey: string; apiKeyHash: string } {
-    const rawApiKey = options.rawApiKey || `shlt_live_${crypto.randomBytes(16).toString('hex')}`;
-    const apiKeyHash =
-      options.apiKeyHash || crypto.createHash('sha256').update(rawApiKey).digest('hex');
-    const ownerOrg = options.ownerOrg || 'org-autonomous-default';
     const now = Date.now();
+    const existing = this.readCredential(policy.agentId);
+    if (existing && !options.rotateKey) {
+      this.upsertPolicy(policy);
+      return { apiKey: '', apiKeyHash: existing.apiKeyHash };
+    }
+
+    const rawApiKey =
+      options.rotateKey || !options.rawApiKey
+        ? `shlt_live_${crypto.randomBytes(16).toString('hex')}`
+        : options.rawApiKey;
+    const apiKeyHash =
+      options.rotateKey || !options.apiKeyHash
+        ? crypto.createHash('sha256').update(rawApiKey).digest('hex')
+        : options.apiKeyHash;
+    const ownerOrg = existing?.ownerOrg || options.ownerOrg || 'org-autonomous-default';
+    const expiresAt = options.rotateKey ? null : options.expiresAt ?? null;
 
     if (this.isFallback) {
+      const previous = this.memAgents.get(policy.agentId);
       this.memAgents.set(policy.agentId, {
         id: policy.agentId,
         owner_org: ownerOrg,
-        status: 'ACTIVE',
+        status: previous?.status ?? 'ACTIVE',
         api_key_hash: apiKeyHash,
-        consecutive_errors: 0,
-        period_start_timestamp: now,
-        current_period_spend_micro_usdc: 0n,
-        total_lifetime_spend_micro_usdc: 0n,
-        created_at: now,
+        api_key_revoked: 0,
+        api_key_expires_at: expiresAt,
+        consecutive_errors: previous?.consecutive_errors ?? 0,
+        period_start_timestamp: previous?.period_start_timestamp ?? now,
+        current_period_spend_micro_usdc: previous?.current_period_spend_micro_usdc ?? 0n,
+        total_lifetime_spend_micro_usdc: previous?.total_lifetime_spend_micro_usdc ?? 0n,
+        created_at: previous?.created_at ?? now,
+        freeze_reason: previous?.freeze_reason,
       });
-      this.memPolicies.set(policy.agentId, {
-        ...policy,
-        version: 1,
-      });
+      this.upsertPolicy(policy);
       return { apiKey: rawApiKey, apiKeyHash };
     }
 
     this.db!.exec('BEGIN IMMEDIATE;');
     try {
-      const agentStmt = this.db!.prepare(`
-        INSERT INTO agents (id, owner_org, status, api_key_hash, period_start_timestamp, created_at)
-        VALUES (?, ?, 'ACTIVE', ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-          owner_org = excluded.owner_org,
-          api_key_hash = excluded.api_key_hash
-      `);
-      agentStmt.run(policy.agentId, ownerOrg, apiKeyHash, now, now);
-
-      const policyStmt = this.db!.prepare(`
-        INSERT INTO policies (
-          agent_id, allowed_vendors_json, max_per_call_micro_usdc,
-          period_budget_micro_usdc, period_seconds, max_consecutive_errors,
-          max_calls_per_minute, version
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-        ON CONFLICT(agent_id) DO UPDATE SET
-          allowed_vendors_json = excluded.allowed_vendors_json,
-          max_per_call_micro_usdc = excluded.max_per_call_micro_usdc,
-          period_budget_micro_usdc = excluded.period_budget_micro_usdc,
-          period_seconds = excluded.period_seconds,
-          max_consecutive_errors = excluded.max_consecutive_errors,
-          max_calls_per_minute = excluded.max_calls_per_minute,
-          version = policies.version + 1
-      `);
-      policyStmt.run(
-        policy.agentId,
-        JSON.stringify(policy.allowedVendors),
-        policy.maxPerCallMicroUsdc.toString(),
-        policy.periodBudgetMicroUsdc.toString(),
-        policy.periodSeconds,
-        policy.circuitBreaker.maxConsecutiveErrors,
-        policy.circuitBreaker.maxCallsPerMinute
-      );
-
+      if (existing) {
+        this.db!.prepare(
+          `UPDATE agents
+           SET api_key_hash = ?, api_key_revoked = 0, api_key_expires_at = NULL
+           WHERE id = ?`
+        ).run(apiKeyHash, policy.agentId);
+      } else {
+        this.db!.prepare(
+          `INSERT INTO agents (
+             id, owner_org, status, api_key_hash, period_start_timestamp, created_at,
+             api_key_revoked, api_key_expires_at
+           )
+           VALUES (?, ?, 'ACTIVE', ?, ?, ?, 0, ?)`
+        ).run(policy.agentId, ownerOrg, apiKeyHash, now, now, expiresAt);
+      }
+      this.upsertPolicy(policy);
       this.db!.exec('COMMIT;');
       return { apiKey: rawApiKey, apiKeyHash };
     } catch (err) {
@@ -251,28 +266,108 @@ export class SqliteLedger {
     }
   }
 
+  private upsertPolicy(policy: SpendingPolicy): void {
+    if (this.isFallback) {
+      const previous = this.memPolicies.get(policy.agentId);
+      this.memPolicies.set(policy.agentId, {
+        ...policy,
+        version: (previous?.version ?? 0) + 1,
+      });
+      return;
+    }
+
+    this.db!.prepare(
+      `INSERT INTO policies (
+        agent_id, allowed_vendors_json, max_per_call_micro_usdc,
+        period_budget_micro_usdc, period_seconds, max_consecutive_errors,
+        max_calls_per_minute, version
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+      ON CONFLICT(agent_id) DO UPDATE SET
+        allowed_vendors_json = excluded.allowed_vendors_json,
+        max_per_call_micro_usdc = excluded.max_per_call_micro_usdc,
+        period_budget_micro_usdc = excluded.period_budget_micro_usdc,
+        period_seconds = excluded.period_seconds,
+        max_consecutive_errors = excluded.max_consecutive_errors,
+        max_calls_per_minute = excluded.max_calls_per_minute,
+        version = policies.version + 1`
+    ).run(
+      policy.agentId,
+      JSON.stringify(policy.allowedVendors),
+      policy.maxPerCallMicroUsdc.toString(),
+      policy.periodBudgetMicroUsdc.toString(),
+      policy.periodSeconds,
+      policy.circuitBreaker.maxConsecutiveErrors,
+      policy.circuitBreaker.maxCallsPerMinute
+    );
+  }
+
+  private readCredential(
+    agentId: string
+  ): { apiKeyHash: string; ownerOrg: string } | null {
+    if (this.isFallback) {
+      const agent = this.memAgents.get(agentId);
+      if (!agent) return null;
+      return { apiKeyHash: agent.api_key_hash, ownerOrg: agent.owner_org };
+    }
+    const row = this.db!.prepare(
+      'SELECT api_key_hash, owner_org FROM agents WHERE id = ?'
+    ).get(agentId) as { api_key_hash: string; owner_org: string } | undefined;
+    if (!row) return null;
+    return { apiKeyHash: row.api_key_hash, ownerOrg: row.owner_org };
+  }
+
+  rotateAgentKey(agentId: string): { apiKey: string; apiKeyHash: string } | null {
+    const existing = this.readCredential(agentId);
+    if (!existing) return null;
+    const policy = this.getAllPolicies().find((item) => item.agentId === agentId);
+    if (!policy) return null;
+    return this.registerAgent(policy, { rotateKey: true });
+  }
+
+  revokeAgentKey(agentId: string): boolean {
+    if (this.isFallback) {
+      const agent = this.memAgents.get(agentId);
+      if (!agent) return false;
+      agent.api_key_revoked = 1;
+      return true;
+    }
+    const result = this.db!.prepare(
+      'UPDATE agents SET api_key_revoked = 1 WHERE id = ?'
+    ).run(agentId);
+    return Number(result.changes) > 0;
+  }
+
+  getAgentOwnerOrg(agentId: string): string | null {
+    return this.readCredential(agentId)?.ownerOrg ?? null;
+  }
+
   // --- Authentication ---
 
-  authenticateApiKey(bearerToken: string): { agentId: string; ownerOrg: string } | null {
-    if (!bearerToken) return null;
-    const cleanKey = bearerToken.replace(/^Bearer\s+/i, '').trim();
-    const hash = crypto.createHash('sha256').update(cleanKey).digest('hex');
+  authenticateApiKey(apiKey: string): { agentId: string; ownerOrg: string } | null {
+    if (!apiKey) return null;
+    const hash = crypto.createHash('sha256').update(apiKey).digest('hex');
+    const now = Date.now();
 
     if (this.isFallback) {
-      for (const [id, a] of this.memAgents.entries()) {
-        if (a.api_key_hash === hash) {
-          return { agentId: id, ownerOrg: a.owner_org };
-        }
+      for (const [id, agent] of this.memAgents.entries()) {
+        if (agent.api_key_hash !== hash) continue;
+        if (agent.api_key_revoked) return null;
+        if (agent.api_key_expires_at != null && agent.api_key_expires_at <= now) return null;
+        return { agentId: id, ownerOrg: agent.owner_org };
       }
       return null;
     }
 
-    const stmt = this.db!.prepare(
-      'SELECT id, owner_org, status FROM agents WHERE api_key_hash = ?'
-    );
-    const row = stmt.get(hash) as any;
+    const row = this.db!.prepare(
+      `SELECT id, owner_org, api_key_revoked, api_key_expires_at
+       FROM agents WHERE api_key_hash = ?`
+    ).get(hash) as
+      | { id: string; owner_org: string; api_key_revoked: number; api_key_expires_at: number | null }
+      | undefined;
     if (!row) return null;
-
+    if (row.api_key_revoked) return null;
+    if (row.api_key_expires_at != null && row.api_key_expires_at <= now) return null;
     return { agentId: row.id, ownerOrg: row.owner_org };
   }
 

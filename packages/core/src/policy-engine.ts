@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import {
   AgentFinancialState,
   AuditLogEntry,
@@ -11,7 +12,6 @@ import { SqliteLedger } from './db.js';
 
 export class PolicyEngine {
   private ledger: SqliteLedger;
-  private registeredApiKeys = new Map<string, string>(); // agentId -> rawApiKey
   private lastReservationByAgent = new Map<string, string>(); // agentId -> reservationId
 
   constructor(dbPath: string = ':memory:') {
@@ -24,15 +24,56 @@ export class PolicyEngine {
 
   registerAgent(
     policy: SpendingPolicy,
-    options: { ownerOrg?: string; rawApiKey?: string; apiKeyHash?: string } = {}
+    options: {
+      ownerOrg?: string;
+      rawApiKey?: string;
+      apiKeyHash?: string;
+      rotateKey?: boolean;
+      expiresAt?: number | null;
+    } = {}
   ): { apiKey: string; apiKeyHash: string } {
-    const creds = this.ledger.registerAgent(policy, options);
-    this.registeredApiKeys.set(policy.agentId, creds.apiKey);
-    return creds;
+    return this.ledger.registerAgent(policy, options);
   }
 
-  getAgentApiKey(agentId: string): string | undefined {
-    return this.registeredApiKeys.get(agentId);
+  /**
+   * Plaintext keys are returned only from registerAgent or rotateAgentKey.
+   * They are not retained or listed afterward.
+   */
+  getAgentApiKey(_agentId: string): string | undefined {
+    return undefined;
+  }
+
+  rotateAgentKey(agentId: string): { apiKey: string; apiKeyHash: string } | null {
+    return this.ledger.rotateAgentKey(agentId);
+  }
+
+  revokeAgentKey(agentId: string): boolean {
+    return this.ledger.revokeAgentKey(agentId);
+  }
+
+  getAgentOwnerOrg(agentId: string): string | null {
+    return this.ledger.getAgentOwnerOrg(agentId);
+  }
+
+  recordPrivilegedAudit(input: {
+    actor: string;
+    agentId: string;
+    action: string;
+    decision: 'ALLOWED' | 'BLOCKED';
+    reason?: string;
+  }): void {
+    const now = Date.now();
+    this.ledger.recordAuditEventSync({
+      eventId: crypto.randomUUID(),
+      actor: input.actor,
+      agentId: input.agentId,
+      action: input.action,
+      decision: input.decision,
+      reason: input.reason,
+      timestamp: now,
+      correlationId: crypto.randomUUID(),
+      detailsJson: JSON.stringify({ action: input.action }),
+    });
   }
 
   authenticateApiKey(bearerToken: string): { agentId: string; ownerOrg: string } | null {
@@ -154,6 +195,7 @@ export class PolicyEngine {
         timestamp: r.timestamp,
         agentId: r.agentId,
         actor: r.actor,
+        action: r.action,
         vendor: details.vendor || 'solana-network',
         estimatedCostMicroUsdc: details.estimatedCost || details.reservedAmountMicroUsdc || '0',
         actualCostMicroUsdc: details.actualCost,

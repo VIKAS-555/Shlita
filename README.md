@@ -150,6 +150,8 @@ npm start
 ```
 Open [http://localhost:4000](http://localhost:4000) to view the live dashboard.
 
+Development startup without `SHLITA_OPERATOR_KEY` generates a local operator key under `.shlita/` and does not print it. Production (`SHLITA_ENV=production`) refuses to start unless `.env.example` is copied to `.env` and the placeholders are replaced with strong values. Demo agent enrollment runs only when `SHLITA_SEED_DEMO=true` outside production. Simulation runs only when `SHLITA_ALLOW_SIMULATION=true` outside production.
+
 ---
 
 ## 6. Integration Example (Agent SDK)
