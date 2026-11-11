@@ -36,7 +36,9 @@ async function runDemo() {
 
   const app = createGatewayApp(engine, undefined, { allowSimulation: true });
 
+  let demoCall = 0;
   const callGateway = async (vendor: string, costMicroUsdc: string, requestPath = '/v0/token-metadata') => {
+    demoCall += 1;
     const res = await app.request('/v1/proxy', {
       method: 'POST',
       headers: {
@@ -50,6 +52,7 @@ async function runDemo() {
         estimatedCostMicroUsdc: costMicroUsdc,
         path: requestPath,
         simulate: true,
+        idempotencyKey: `demo-${demoCall}-${requestPath.replace(/[^A-Za-z0-9]/g, '')}`,
       }),
     });
     return { status: res.status, data: await res.json() };
@@ -60,10 +63,10 @@ async function runDemo() {
   console.log(`Agent: ${agentId} requesting Helius RPC and Tavily Search...`);
 
   const step1 = await callGateway('api.helius.xyz', '20000', '/v0/addresses/USDC/balances');
-  console.log(`  ✓ Call 1 -> ${step1.data.vendor}: ${GREEN}APPROVED${RESET} (Cost: $0.020 USDC)`);
+  console.log(`  ✓ Call 1 -> ${step1.data.vendor}: ${GREEN}APPROVED${RESET} (Estimated tariff: $${(Number(step1.data.cost.estimatedCostMicroUsdc) / 1e6).toFixed(2)} USDC, not settled)`);
 
   const step2 = await callGateway('api.tavily.com', '15000', '/search');
-  console.log(`  ✓ Call 2 -> ${step2.data.vendor}: ${GREEN}APPROVED${RESET} (Cost: $0.015 USDC)`);
+  console.log(`  ✓ Call 2 -> ${step2.data.vendor}: ${GREEN}APPROVED${RESET} (Estimated tariff: $${(Number(step2.data.cost.estimatedCostMicroUsdc) / 1e6).toFixed(2)} USDC, not settled)`);
 
   let state = engine.getAgentState(agentId);
   console.log(`  -> Current Spend: ${(Number(state.currentPeriodSpendMicroUsdc)/1e6).toFixed(4)} USDC / $0.150 USDC max`);
@@ -94,7 +97,7 @@ async function runDemo() {
   for (let i = 1; i <= 6; i++) {
     const loopRes = await callGateway('api.helius.xyz', '5000', `/v0/retry-${i}`);
     if (loopRes.status === 200) {
-      console.log(`  -> Loop call ${i}: Executed ($0.005 USDC)`);
+      console.log(`  -> Loop call ${i}: Executed (estimated tariff, not settled)`);
     } else {
       console.log(`  🛑 ${RED}${BOLD}CIRCUIT BREAKER ACTIVATED on call ${i}!${RESET}`);
       console.log(`  -> Policy Violation: ${RED}${loopRes.data.reason}${RESET}`);

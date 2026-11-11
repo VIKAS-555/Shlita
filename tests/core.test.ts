@@ -273,11 +273,11 @@ describe('Shlita Core Policy Engine (Public Seam)', () => {
     expect(first.allowed).toBe(true);
     const resId = first.allowed ? first.reservationId! : '';
 
-    // Retrying with same idempotency key before commit returns existing reservation
+    // A second reservation for the same key must not be granted while the first is active.
     const retryBeforeCommit = engine.evaluateAndReserve(req);
-    expect(retryBeforeCommit.allowed).toBe(true);
-    if (retryBeforeCommit.allowed) {
-      expect(retryBeforeCommit.reservationId).toBe(resId);
+    expect(retryBeforeCommit.allowed).toBe(false);
+    if (!retryBeforeCommit.allowed) {
+      expect(retryBeforeCommit.reason).toBe('CONCURRENCY_RESERVATION_FAILED');
     }
 
     // Commit the reservation

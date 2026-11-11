@@ -13,6 +13,7 @@ export interface ProxyRequestParams {
   body?: any;
   headers?: Record<string, string>;
   simulate?: boolean;
+  idempotencyKey: string;
 }
 
 export interface ProxyResponse<T = any> {
@@ -42,6 +43,9 @@ export class ShlitaClient {
    * Proxies an outbound paid tool/API request through the Shlita policy perimeter.
    */
   async proxy<T = any>(params: ProxyRequestParams): Promise<ProxyResponse<T>> {
+    if (!params.idempotencyKey) {
+      throw new Error('ShlitaClient.proxy requires an idempotencyKey.');
+    }
     const res = await fetch(`${this.baseUrl}/v1/proxy`, {
       method: 'POST',
       headers: {
@@ -56,6 +60,7 @@ export class ShlitaClient {
         method: params.method ?? 'POST',
         payload: params.body,
         simulate: params.simulate,
+        idempotencyKey: params.idempotencyKey,
       }),
       signal: AbortSignal.timeout(this.timeoutMs),
     });

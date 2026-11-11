@@ -2,7 +2,8 @@ import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { PolicyEngine } from '../../core/src/index.js';
 import { SolanaSettlementManager } from '../../solana/src/settlement.js';
-import { TransactionLifecycleState } from '../../core/src/types.js';
+import { parseMicroUsdc } from '../../core/src/money.js';
+import { requestFingerprint } from '../../core/src/fingerprint.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -198,6 +199,74 @@ function enforceProviderRoute(
   return { ok: true, method: normalized };
 }
 
+function simulatedUpstream(vendor: string, requestPayload: unknown) {
+  if (vendor.includes('helius')) {
+    return {
+      network: 'solana-devnet',
+      slot: 318492048,
+      result: {
+        account: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+        balanceMicroUsdc: 25000000,
+        activeDelegations: 2,
+        program: 'De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44',
+      },
+    };
+  }
+  if (vendor.includes('tavily')) {
+    return {
+      query:
+        requestPayload &&
+        typeof requestPayload === 'object' &&
+        'query' in requestPayload &&
+        typeof requestPayload.query === 'string'
+          ? requestPayload.query
+          : 'Solana Subscriptions Protocol',
+      results: [
+        { title: 'Official Solana Subscriptions & Allowances Program', score: 0.99 },
+        { title: 'Autonomous AI Agent Micro-Settlements on Solana', score: 0.96 },
+      ],
+    };
+  }
+  return { message: 'Simulated upstream response returned under test perimeter.' };
+}
+
+async function dispatchUpstream(
+  exchange: { url: string; method: string; body?: unknown; timeoutMs: number },
+  providerDef?: ProviderDefinition
+): Promise<{ status: number; body: unknown }> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'Shlita-Financial-Control-Plane/1.0',
+  };
+  let fetchUrl = exchange.url;
+  if (providerDef?.envKeyName && process.env[providerDef.envKeyName]) {
+    const secret = process.env[providerDef.envKeyName]!;
+    if (providerDef.authParamName) {
+      const urlObj = new URL(fetchUrl);
+      urlObj.searchParams.set(providerDef.authParamName, secret);
+      fetchUrl = urlObj.toString();
+    } else if (providerDef.authHeaderName) {
+      headers[providerDef.authHeaderName] = `Bearer ${secret}`;
+    }
+  }
+  const upstreamRes = await fetch(fetchUrl, {
+    method: exchange.method,
+    headers,
+    body:
+      exchange.method !== 'GET' && exchange.method !== 'HEAD' && exchange.body !== undefined
+        ? JSON.stringify(exchange.body)
+        : undefined,
+    redirect: 'manual',
+    signal: AbortSignal.timeout(exchange.timeoutMs),
+  });
+  const text = await upstreamRes.text();
+  try {
+    return { status: upstreamRes.status, body: JSON.parse(text) };
+  } catch {
+    return { status: upstreamRes.status, body: text };
+  }
+}
+
 export function createGatewayApp(
   engine: PolicyEngine,
   settlementManager?: SolanaSettlementManager,
@@ -314,186 +383,172 @@ export function createGatewayApp(
     }
     const upstreamMethod = routeCheck.method;
 
-    // 3. Server-Side Pricing & Tariffs
-    const providerDef = PROVIDER_DEFINITIONS[vendor.toLowerCase()];
-    const serverTariff = providerDef?.tariffMicroUsdc ?? 10_000n; // Default $0.01 USDC
-    const callerCost = estimatedCostMicroUsdc ? BigInt(estimatedCostMicroUsdc) : 0n;
-    // Server calculates authoritative upper-bound reservation quote
-    const authoritativeQuoteMicroUsdc = callerCost > serverTariff ? callerCost : serverTariff;
-
-    // 4. Atomic Budget Reservation against Policy Perimeter
-    const decision = engine.evaluateAndReserve({
-      agentId: resolvedAgentId,
-      vendor,
-      estimatedCostMicroUsdc: authoritativeQuoteMicroUsdc,
-      timestamp: now,
-      idempotencyKey,
-    });
-
-    if (!decision.allowed) {
-      c.header('x-shlita-decision', 'BLOCKED');
-      c.header('x-shlita-violation-reason', decision.reason);
+    if (typeof idempotencyKey !== 'string' || !/^[A-Za-z0-9._~:-]{8,200}$/.test(idempotencyKey)) {
       return c.json(
         {
           allowed: false,
-          error: 'POLICY_VIOLATION',
-          reason: decision.reason,
-          message: decision.message,
-          timestamp: now,
+          error: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'A billable request requires an idempotency key.',
         },
-        403
+        400
       );
     }
 
-    const reservationId = decision.reservationId!;
+    let declaredCost: bigint | undefined;
+    if (estimatedCostMicroUsdc !== undefined && estimatedCostMicroUsdc !== null && estimatedCostMicroUsdc !== '') {
+      const parsedCost = parseMicroUsdc(estimatedCostMicroUsdc);
+      if (!parsedCost.ok) {
+        return c.json({ allowed: false, error: 'AMOUNT_REJECTED', message: parsedCost.message }, 400);
+      }
+      declaredCost = parsedCost.amount;
+    }
+
+    const providerDef = PROVIDER_DEFINITIONS[vendor.toLowerCase()];
+    const serverTariff = providerDef?.tariffMicroUsdc ?? 10_000n;
+    const fingerprint = requestFingerprint({
+      agentId: resolvedAgentId,
+      vendorHost: destValidation.host!,
+      method: upstreamMethod,
+      path: reqPath,
+      body: requestPayload ?? null,
+    });
+
+    const claim = engine.claimExecution({
+      agentId: resolvedAgentId,
+      vendor: destValidation.host!,
+      method: upstreamMethod,
+      path: reqPath,
+      fingerprint,
+      idempotencyKey,
+      estimatedCostMicroUsdc: serverTariff,
+      reservedAmountMicroUsdc: serverTariff,
+      declaredCostMicroUsdc: declaredCost,
+      timestamp: now,
+    });
+
+    if (claim.kind === 'conflict') {
+      return c.json(
+        {
+          allowed: false,
+          error: 'IDEMPOTENCY_CONFLICT',
+          message: 'This idempotency key was already used for a different request.',
+        },
+        409
+      );
+    }
+    if (claim.kind === 'in_progress') {
+      return c.json(
+        {
+          allowed: false,
+          error: 'OPERATION_IN_PROGRESS',
+          operationId: claim.operationId,
+          message: 'This operation is already executing. It was not dispatched again.',
+        },
+        409
+      );
+    }
+    if (claim.kind === 'replay') {
+      c.header('x-shlita-idempotent-replay', 'true');
+      if (claim.body.reason) c.header('x-shlita-violation-reason', String(claim.body.reason));
+      c.header('x-shlita-decision', claim.httpStatus >= 400 ? 'BLOCKED' : 'ALLOWED');
+      return c.json(claim.body, claim.httpStatus as 200);
+    }
+    if (claim.kind === 'rejected') {
+      c.header('x-shlita-decision', 'BLOCKED');
+      if (claim.body.reason) c.header('x-shlita-violation-reason', String(claim.body.reason));
+      return c.json(claim.body, claim.httpStatus as 400);
+    }
 
     const targetUrl = destValidation.url!;
-    let responseData: any = null;
-    let actualStatus = 200;
-    const startMs = performance.now();
-
-    // 5. Explicit Simulation Flag (NEVER auto-simulate based on vendor name!)
     const isExplicitSimulation = allowSimulation && simulationRequested(rawBody, c.req.header('x-shlita-simulation'));
-
-    let actualCostMicroUsdc = serverTariff;
+    const startMs = performance.now();
+    let upstreamStatus = 200;
+    let upstreamBody: unknown;
 
     if (isExplicitSimulation) {
-      // Explicit Simulation Mode
-      if (vendor.includes('helius')) {
-        responseData = {
-          network: 'solana-devnet',
-          slot: 318492048,
-          result: {
-            account: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
-            balanceMicroUsdc: 25000000,
-            activeDelegations: 2,
-            program: 'De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44',
-          },
-        };
-      } else if (vendor.includes('tavily')) {
-        responseData = {
-          query:
-            requestPayload &&
-            typeof requestPayload === 'object' &&
-            'query' in requestPayload &&
-            typeof requestPayload.query === 'string'
-              ? requestPayload.query
-              : 'Solana Subscriptions Protocol',
-          results: [
-            { title: 'Official Solana Subscriptions & Allowances Program', score: 0.99 },
-            { title: 'Autonomous AI Agent Micro-Settlements on Solana', score: 0.96 },
-          ],
-        };
-      } else {
-        responseData = { message: 'Simulated upstream response returned under test perimeter.' };
-      }
+      upstreamStatus = 200;
+      upstreamBody = simulatedUpstream(vendor, requestPayload);
     } else {
-      // Real Upstream Network Request Forwarding
       try {
-        const upstreamHeaders: Record<string, string> = {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Shlita-Financial-Control-Plane/1.0',
-        };
-
-        // Attach server-held provider credentials (NEVER forward agent's Shlita token!)
-        let fetchUrl = targetUrl;
-        if (providerDef?.envKeyName && process.env[providerDef.envKeyName]) {
-          const secret = process.env[providerDef.envKeyName]!;
-          if (providerDef.authParamName) {
-            const urlObj = new URL(fetchUrl);
-            urlObj.searchParams.set(providerDef.authParamName, secret);
-            fetchUrl = urlObj.toString();
-          } else if (providerDef.authHeaderName) {
-            upstreamHeaders[providerDef.authHeaderName] = `Bearer ${secret}`;
-          }
-        }
-
-        const upstreamRes = await fetch(fetchUrl, {
+        const dispatch = security.upstream ?? ((exchange) => dispatchUpstream(exchange, providerDef));
+        const upstream = await dispatch({
+          url: targetUrl,
           method: upstreamMethod,
-          headers: upstreamHeaders,
-          body:
-            upstreamMethod !== 'GET' && upstreamMethod !== 'HEAD' && requestPayload
-              ? JSON.stringify(requestPayload)
-              : undefined,
-          redirect: 'manual', // Prevent redirect-based SSRF hops
-          signal: AbortSignal.timeout(providerDef?.timeoutMs || 15000),
+          body: requestPayload,
+          timeoutMs: providerDef?.timeoutMs || 15000,
         });
-
-        actualStatus = upstreamRes.status;
-        const text = await upstreamRes.text();
-        try {
-          responseData = JSON.parse(text);
-        } catch {
-          responseData = text;
-        }
-
-        // Billable status check
-        if (actualStatus >= 500) {
-          // Upstream 5xx: Rollback reservation
-          engine.rollbackReservation(reservationId, `Upstream HTTP ${actualStatus}`);
-          return c.json(
-            {
-              allowed: true,
-              error: 'UPSTREAM_GATEWAY_ERROR',
-              message: `Upstream vendor ${vendor} responded with status ${actualStatus}`,
-              reservationRolledBack: true,
-              upstreamStatus: actualStatus,
-            },
-            502
-          );
-        }
-      } catch (err: any) {
-        engine.rollbackReservation(reservationId, err?.message || 'Upstream connection error');
-        return c.json(
-          {
-            allowed: true,
-            error: 'UPSTREAM_GATEWAY_ERROR',
-            message: `Failed to forward request to ${targetUrl}: ${err?.message}`,
-            reservationRolledBack: true,
-          },
-          502
-        );
+        upstreamStatus = upstream.status;
+        upstreamBody = upstream.body;
+      } catch (error) {
+        const finished = engine.finishExecution(claim.operationId, {
+          type: 'unknown',
+          reason: error instanceof Error ? error.name || error.message : 'Upstream outcome unknown',
+        });
+        return c.json(finished.body, 504);
       }
     }
 
     const latencyMs = Number((performance.now() - startMs).toFixed(2));
+    if (!isExplicitSimulation && upstreamStatus >= 400) {
+      const finished = engine.finishExecution(claim.operationId, {
+        type: 'failed',
+        httpStatus: 502,
+        reason: `Upstream HTTP ${upstreamStatus}`,
+        result: {
+          allowed: true,
+          error: 'UPSTREAM_GATEWAY_ERROR',
+          message: `Upstream vendor responded with status ${upstreamStatus}`,
+          upstreamStatus,
+          reservationRolledBack: true,
+          lifecycleState: 'VENDOR_FAILED',
+        },
+      });
+      return c.json(finished.body, finished.httpStatus as 502);
+    }
 
-    // 6. Commit atomic reservation into ledger
-    engine.commitReservation(reservationId, actualCostMicroUsdc);
-
-    const updatedState = engine.getAgentState(resolvedAgentId);
-
-    // 7. Settlement Ledger Orchestration (Honest States)
-    // State is SETTLEMENT_PENDING until on-chain submission & confirmation
-    const settlementState: TransactionLifecycleState = 'SETTLEMENT_PENDING';
-
-    c.header('x-shlita-decision', 'ALLOWED');
-    c.header('x-shlita-reservation-id', reservationId);
-    c.header('x-shlita-spend-micro-usdc', updatedState.currentPeriodSpendMicroUsdc.toString());
-    c.header('x-shlita-agent-status', updatedState.status);
-    c.header('x-shlita-latency-ms', latencyMs.toString());
-
-    return c.json({
-      success: true,
+    const responseBody = {
       mode: isExplicitSimulation ? 'simulated' : 'live',
-      vendor,
+      vendor: destValidation.host,
       targetUrl,
-      status: actualStatus,
+      status: upstreamStatus,
       latencyMs,
-      lifecycleState: 'VENDOR_SUCCEEDED',
+      lifecycleState: 'ACCOUNTING_COMMITTED',
+      idempotencyKey,
       cost: {
-        authorizedQuoteMicroUsdc: authoritativeQuoteMicroUsdc.toString(),
-        actualCostMicroUsdc: actualCostMicroUsdc.toString(),
+        estimatedCostMicroUsdc: claim.estimatedMicroUsdc.toString(),
+        reservedAmountMicroUsdc: claim.reservedMicroUsdc.toString(),
+        actualCostMicroUsdc: null,
+        settledAmountMicroUsdc: null,
+        costBasis: 'ESTIMATED',
         currency: 'USDC',
       },
       settlement: {
-        costMicroUsdc: actualCostMicroUsdc.toString(),
+        status: 'NOT_SUBMITTED',
+        fundsMoved: false,
+        reservationId: claim.reservationId,
         currency: 'USDC',
-        status: settlementState, // NEVER SETTLED!
-        reservationId,
       },
-      upstream: responseData,
+      upstream: upstreamBody,
+    };
+    const finished = engine.finishExecution(claim.operationId, {
+      type: 'succeeded',
+      httpStatus: 200,
+      result: responseBody,
     });
+    if (!finished.ok) {
+      c.header('x-shlita-decision', 'BLOCKED');
+      return c.json(finished.body, finished.httpStatus as 500);
+    }
+
+    const updatedState = engine.getAgentState(resolvedAgentId);
+    c.header('x-shlita-decision', 'ALLOWED');
+    c.header('x-shlita-reservation-id', claim.reservationId);
+    c.header('x-shlita-operation-id', claim.operationId);
+    c.header('x-shlita-correlation-id', claim.correlationId);
+    c.header('x-shlita-spend-micro-usdc', updatedState.currentPeriodSpendMicroUsdc.toString());
+    c.header('x-shlita-agent-status', updatedState.status);
+    c.header('x-shlita-latency-ms', latencyMs.toString());
+    return c.json(finished.body, 200);
   });
 
   function auditPrivileged(
@@ -611,6 +666,20 @@ export function createGatewayApp(
     engine.resetCircuitBreaker(gate.agentId);
     auditPrivileged(gate.agentId, 'reset-circuit', 'ALLOWED', `operator:${gate.ownerOrg}`);
     return c.json({ success: true, agentId: gate.agentId, status: 'ACTIVE' });
+  });
+
+  app.get('/v1/reconciliation', (c) => {
+    const operator = resolveOperator(c.req, operators);
+    if (!operator.ok) {
+      auditPrivileged('*', 'read-reconciliation', 'BLOCKED', 'anonymous', operator.status === 401 ? 'OPERATOR_AUTH_REQUIRED' : 'OPERATOR_FORBIDDEN');
+      return c.json(
+        operator.status === 401
+          ? { error: 'UNAUTHORIZED', message: 'Authentication required.' }
+          : { error: 'FORBIDDEN', message: 'Forbidden.' },
+        operator.status
+      );
+    }
+    return c.json({ operations: engine.listReconciliation(operator.ownerOrg) });
   });
 
   // Audit Logs & Active Reservations

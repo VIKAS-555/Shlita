@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -33,6 +34,7 @@ function proxyBody(agentId?: string) {
     method: 'POST',
     body: { mints: ['test'] },
     simulate: true,
+    idempotencyKey: `sec-${crypto.randomUUID()}`,
   });
 }
 

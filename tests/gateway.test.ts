@@ -52,6 +52,7 @@ describe('Shlita Gateway HTTP Seam', () => {
         method: 'POST',
         path: '/v0/token-metadata',
         body: { mints: ['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'] },
+        idempotencyKey: 'gateway-proxy-allow-01',
         simulate: true,
       }),
     });
@@ -103,6 +104,7 @@ describe('Shlita Gateway HTTP Seam', () => {
         vendor: 'api.helius.xyz',
         path: '/v0/token-metadata',
         estimatedCostMicroUsdc: '10000',
+        idempotencyKey: 'gateway-frozen-followup-01',
         simulate: true,
       }),
     });
@@ -187,6 +189,7 @@ describe('Shlita Gateway HTTP Seam', () => {
         vendor: 'api.helius.xyz',
         path: '/v0/token-metadata',
         body: { query: 'test' },
+        idempotencyKey: 'gateway-auth-allow-01',
         simulate: true,
       }),
     });
@@ -194,7 +197,10 @@ describe('Shlita Gateway HTTP Seam', () => {
     const validData = await validRes.json();
     expect(validData.success).toBe(true);
     expect(validData.mode).toBe('simulated');
-    expect(validData.settlement.status).toBe('SETTLEMENT_PENDING');
+    expect(validData.settlement.status).toBe('NOT_SUBMITTED');
+    expect(validData.settlement.fundsMoved).toBe(false);
+    expect(validData.cost.costBasis).toBe('ESTIMATED');
+    expect(validData.cost.actualCostMicroUsdc).toBeNull();
 
     const unauthRes = await app.request('/v1/proxy', {
       method: 'POST',
@@ -256,6 +262,7 @@ describe('Shlita Gateway HTTP Seam', () => {
         vendor: 'api.helius.xyz',
         path: '/v0/token-metadata',
         body: { mints: ['test'] },
+        idempotencyKey: 'gateway-sdk-allow-01',
         simulate: true,
       });
 

@@ -51,6 +51,7 @@ export function bootFromEnv(env: Record<string, string | undefined>): BootSucces
 
   const dbPath = config.dbPath || path.resolve(process.cwd(), config.stateDir, 'ledger.db');
   const engine = createPolicyEngine(dbPath);
+  engine.recoverInFlightOperations();
   if (config.seedDemo) {
     enrollDemoAgents(engine, config);
   }

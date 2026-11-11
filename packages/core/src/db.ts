@@ -17,6 +17,7 @@ import {
   AgentRecord,
   AuditEventRecord,
   BudgetReservation,
+  CostBasis,
   PolicyDecision,
   PolicyRecord,
   RequestRecord,
@@ -25,9 +26,12 @@ import {
   SpendingPolicy,
   TransactionLifecycleState,
 } from './types.js';
+import { MAX_MICRO_USDC, parseMicroUsdc, parseStoredMicroUsdc } from './money.js';
+import { assertTransition, idempotencyReference, IN_FLIGHT_STATES, RESERVATION_HOLD_STATES } from './lifecycle.js';
 
 export interface SqliteLedgerOptions {
   dbPath?: string; // ':memory:' or file path
+  requirePersistent?: boolean;
 }
 
 export class SqliteLedger {
@@ -41,9 +45,18 @@ export class SqliteLedger {
   private memRateCalls: Array<{ agentId: string; timestamp: number }> = [];
   private memSettlements = new Map<string, any>();
   private memAuditEvents: AuditEventRecord[] = [];
+  private memOperations = new Map<string, any>();
+  private commitShouldFail = false;
 
   constructor(options: SqliteLedgerOptions = {}) {
     const target = options.dbPath ?? ':memory:';
+    const production =
+      options.requirePersistent === true ||
+      process.env.SHLITA_ENV === 'production' ||
+      process.env.NODE_ENV === 'production';
+    if (production && (target === ':memory:' || !NodeDatabaseSync)) {
+      throw new Error('Persistent ledger is required in production.');
+    }
     if (NodeDatabaseSync) {
       if (target !== ':memory:') {
         const dir = path.dirname(path.resolve(target));
@@ -175,6 +188,38 @@ export class SqliteLedger {
         details_json TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_events(timestamp DESC);
+    `);
+
+    // 8. Financial operations. Additive: existing agent, policy, and reservation rows stay.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS financial_operations (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        idempotency_ref TEXT NOT NULL,
+        request_fingerprint TEXT NOT NULL,
+        vendor TEXT NOT NULL,
+        method TEXT NOT NULL,
+        path TEXT NOT NULL,
+        estimated_cost_micro_usdc TEXT NOT NULL,
+        reserved_amount_micro_usdc TEXT NOT NULL,
+        actual_cost_micro_usdc TEXT,
+        cost_basis TEXT NOT NULL,
+        state TEXT NOT NULL,
+        reservation_id TEXT,
+        correlation_id TEXT NOT NULL,
+        policy_version INTEGER,
+        decision TEXT,
+        reason TEXT,
+        response_status INTEGER,
+        result_json TEXT,
+        settlement_status TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(agent_id, idempotency_key),
+        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_operations_state ON financial_operations(state);
     `);
   }
 
@@ -453,10 +498,9 @@ export class SqliteLedger {
           if (r.agent_id === request.agentId && r.idempotency_key === request.idempotencyKey) {
             if (r.status === 'PENDING') {
               return {
-                allowed: true,
-                authorizedAmountMicroUsdc: r.reserved_amount_micro_usdc,
-                reservationId: id,
-                idempotencyKey: request.idempotencyKey,
+                allowed: false,
+                reason: 'CONCURRENCY_RESERVATION_FAILED',
+                message: `Idempotency key '${request.idempotencyKey}' already has an active reservation.`,
               };
             }
             if (r.status === 'COMMITTED') {
@@ -608,12 +652,11 @@ export class SqliteLedger {
           .get(request.agentId, request.idempotencyKey) as any;
         if (existingRes) {
           if (existingRes.status === 'PENDING') {
-            this.db!.exec('COMMIT;');
+            this.db!.exec('ROLLBACK;');
             return {
-              allowed: true,
-              authorizedAmountMicroUsdc: BigInt(existingRes.reserved_amount_micro_usdc),
-              reservationId: existingRes.id,
-              idempotencyKey: request.idempotencyKey,
+              allowed: false,
+              reason: 'CONCURRENCY_RESERVATION_FAILED',
+              message: `Idempotency key '${request.idempotencyKey}' already has an active reservation.`,
             };
           }
           if (existingRes.status === 'COMMITTED') {
@@ -627,7 +670,7 @@ export class SqliteLedger {
         }
       }
 
-      let currentPeriodSpend = BigInt(agent.current_period_spend_micro_usdc);
+      let currentPeriodSpend = parseStoredMicroUsdc(String(agent.current_period_spend_micro_usdc));
       let periodStart = agent.period_start_timestamp;
       const periodDurationMs = periodSeconds * 1000;
 
@@ -641,13 +684,7 @@ export class SqliteLedger {
           .run(now, request.agentId);
       }
 
-      const activeResRow = this.db!
-        .prepare(
-          `SELECT COALESCE(SUM(CAST(reserved_amount_micro_usdc AS INTEGER)), 0) as total
-           FROM reservations WHERE agent_id = ? AND status = 'PENDING'`
-        )
-        .get(request.agentId) as any;
-      const activeReservations = BigInt(activeResRow?.total ?? 0);
+      const activeReservations = this.sumPendingReservations(request.agentId);
 
       const totalCommittedAndReserved =
         currentPeriodSpend + activeReservations + request.estimatedCostMicroUsdc;
@@ -736,27 +773,50 @@ export class SqliteLedger {
         return false;
       }
 
-      const reservedAmount = BigInt(res.reserved_amount_micro_usdc);
+      const reservedAmount = parseStoredMicroUsdc(String(res.reserved_amount_micro_usdc));
       const actualCost = actualCostMicroUsdc !== undefined ? actualCostMicroUsdc : reservedAmount;
 
-      if (actualCost > reservedAmount) {
+      if (actualCost > reservedAmount || actualCost < 0n) {
         this.db!.exec('ROLLBACK;');
         return false;
       }
 
-      this.db!
-        .prepare("UPDATE reservations SET status = 'COMMITTED' WHERE id = ?")
-        .run(reservationId);
+      if (this.commitShouldFail) {
+        this.commitShouldFail = false;
+        this.db!.exec('ROLLBACK;');
+        return false;
+      }
 
+      const committed = this.db!
+        .prepare("UPDATE reservations SET status = 'COMMITTED' WHERE id = ? AND status = 'PENDING'")
+        .run(reservationId);
+      if (Number(committed.changes) !== 1) {
+        this.db!.exec('ROLLBACK;');
+        return false;
+      }
+
+      const spend = this.db!
+        .prepare(
+          'SELECT current_period_spend_micro_usdc, total_lifetime_spend_micro_usdc FROM agents WHERE id = ?'
+        )
+        .get(res.agent_id) as
+        | { current_period_spend_micro_usdc: string; total_lifetime_spend_micro_usdc: string }
+        | undefined;
+      const nextPeriod = parseStoredMicroUsdc(spend?.current_period_spend_micro_usdc ?? '0') + actualCost;
+      const nextLifetime = parseStoredMicroUsdc(spend?.total_lifetime_spend_micro_usdc ?? '0') + actualCost;
+      if (nextPeriod > MAX_MICRO_USDC || nextLifetime > MAX_MICRO_USDC) {
+        this.db!.exec('ROLLBACK;');
+        return false;
+      }
       this.db!
         .prepare(
           `UPDATE agents SET
-             current_period_spend_micro_usdc = CAST((CAST(current_period_spend_micro_usdc AS INTEGER) + ?) AS TEXT),
-             total_lifetime_spend_micro_usdc = CAST((CAST(total_lifetime_spend_micro_usdc AS INTEGER) + ?) AS TEXT),
+             current_period_spend_micro_usdc = ?,
+             total_lifetime_spend_micro_usdc = ?,
              consecutive_errors = 0
            WHERE id = ?`
         )
-        .run(actualCost.toString(), actualCost.toString(), res.agent_id);
+        .run(nextPeriod.toString(), nextLifetime.toString(), res.agent_id);
 
       this.db!.exec('COMMIT;');
       return true;
@@ -775,16 +835,15 @@ export class SqliteLedger {
     if (this.isFallback) {
       const res = this.memReservations.get(reservationId);
       if (!res) return false;
-      if (res.status === 'PENDING') {
-        res.status = 'ROLLED_BACK';
-        const agent = this.memAgents.get(res.agent_id);
-        const policy = this.memPolicies.get(res.agent_id);
-        if (agent && policy) {
-          agent.consecutive_errors = (agent.consecutive_errors || 0) + 1;
-          if (agent.consecutive_errors >= policy.circuitBreaker.maxConsecutiveErrors) {
-            agent.status = 'CIRCUIT_TRIPPED';
-            agent.freeze_reason = reason || 'Consecutive errors breached';
-          }
+      if (res.status !== 'PENDING') return false;
+      res.status = 'ROLLED_BACK';
+      const agent = this.memAgents.get(res.agent_id);
+      const policy = this.memPolicies.get(res.agent_id);
+      if (agent && policy) {
+        agent.consecutive_errors = (agent.consecutive_errors || 0) + 1;
+        if (agent.consecutive_errors >= policy.circuitBreaker.maxConsecutiveErrors) {
+          agent.status = 'CIRCUIT_TRIPPED';
+          agent.freeze_reason = reason || 'Consecutive errors breached';
         }
       }
       return true;
@@ -799,30 +858,37 @@ export class SqliteLedger {
         return false;
       }
 
-      if (res.status === 'PENDING') {
-        this.db!
-          .prepare("UPDATE reservations SET status = 'ROLLED_BACK' WHERE id = ?")
-          .run(reservationId);
+      if (res.status !== 'PENDING') {
+        this.db!.exec('ROLLBACK;');
+        return false;
+      }
 
-        const agentStmt = this.db!.prepare('SELECT * FROM agents WHERE id = ?');
-        const agent = agentStmt.get(res.agent_id) as any;
-        const policyStmt = this.db!.prepare('SELECT * FROM policies WHERE agent_id = ?');
-        const policy = policyStmt.get(res.agent_id) as any;
+      const rolled = this.db!
+        .prepare("UPDATE reservations SET status = 'ROLLED_BACK' WHERE id = ? AND status = 'PENDING'")
+        .run(reservationId);
+      if (Number(rolled.changes) !== 1) {
+        this.db!.exec('ROLLBACK;');
+        return false;
+      }
 
-        if (agent && policy) {
-          const nextErrors = (agent.consecutive_errors || 0) + 1;
-          const maxErrors = policy.max_consecutive_errors || 3;
-          if (nextErrors >= maxErrors) {
-            this.db!
-              .prepare(
-                `UPDATE agents SET consecutive_errors = ?, status = 'CIRCUIT_TRIPPED', freeze_reason = ? WHERE id = ?`
-              )
-              .run(nextErrors, `Consecutive upstream errors (${nextErrors}) exceeded threshold`, res.agent_id);
-          } else {
-            this.db!
-              .prepare('UPDATE agents SET consecutive_errors = ? WHERE id = ?')
-              .run(nextErrors, res.agent_id);
-          }
+      const agentStmt = this.db!.prepare('SELECT * FROM agents WHERE id = ?');
+      const agent = agentStmt.get(res.agent_id) as any;
+      const policyStmt = this.db!.prepare('SELECT * FROM policies WHERE agent_id = ?');
+      const policy = policyStmt.get(res.agent_id) as any;
+
+      if (agent && policy) {
+        const nextErrors = (agent.consecutive_errors || 0) + 1;
+        const maxErrors = policy.max_consecutive_errors || 3;
+        if (nextErrors >= maxErrors) {
+          this.db!
+            .prepare(
+              `UPDATE agents SET consecutive_errors = ?, status = 'CIRCUIT_TRIPPED', freeze_reason = ? WHERE id = ?`
+            )
+            .run(nextErrors, `Consecutive upstream errors (${nextErrors}) exceeded threshold`, res.agent_id);
+        } else {
+          this.db!
+            .prepare('UPDATE agents SET consecutive_errors = ? WHERE id = ?')
+            .run(nextErrors, res.agent_id);
         }
       }
 
@@ -875,8 +941,13 @@ export class SqliteLedger {
   pruneExpiredReservations(now = Date.now()): number {
     if (this.isFallback) {
       let count = 0;
+      const held = new Set(
+        [...this.memOperations.values()]
+          .filter((operation) => RESERVATION_HOLD_STATES.includes(operation.state) && operation.reservation_id)
+          .map((operation) => operation.reservation_id as string)
+      );
       for (const r of this.memReservations.values()) {
-        if (r.status === 'PENDING' && r.expires_at < now) {
+        if (r.status === 'PENDING' && r.expires_at < now && !held.has(r.id)) {
           r.status = 'EXPIRED';
           count++;
         }
@@ -884,10 +955,16 @@ export class SqliteLedger {
       return count;
     }
 
+    const protectedStates = RESERVATION_HOLD_STATES.map(() => '?').join(', ');
     const stmt = this.db!.prepare(
-      "UPDATE reservations SET status = 'EXPIRED' WHERE status = 'PENDING' AND expires_at < ?"
+      `UPDATE reservations SET status = 'EXPIRED'
+       WHERE status = 'PENDING' AND expires_at < ?
+       AND id NOT IN (
+         SELECT reservation_id FROM financial_operations
+         WHERE reservation_id IS NOT NULL AND state IN (${protectedStates})
+       )`
     );
-    const result = stmt.run(now);
+    const result = stmt.run(now, ...RESERVATION_HOLD_STATES);
     return Number(result.changes);
   }
 
@@ -1027,12 +1104,7 @@ export class SqliteLedger {
     const agent = this.db!.prepare('SELECT * FROM agents WHERE id = ?').get(agentId) as any;
     if (!agent) return null;
 
-    const activeRes = this.db!
-      .prepare(
-        `SELECT COALESCE(SUM(CAST(reserved_amount_micro_usdc AS INTEGER)), 0) as total
-         FROM reservations WHERE agent_id = ? AND status = 'PENDING'`
-      )
-      .get(agentId) as any;
+    const activeRes = this.sumPendingReservations(agentId);
 
     const rateCalls = this.db!
       .prepare(
@@ -1045,7 +1117,7 @@ export class SqliteLedger {
       status: agent.status,
       currentPeriodSpendMicroUsdc: BigInt(agent.current_period_spend_micro_usdc),
       totalLifetimeSpendMicroUsdc: BigInt(agent.total_lifetime_spend_micro_usdc),
-      activePendingReservationsMicroUsdc: BigInt(activeRes?.total ?? 0),
+      activePendingReservationsMicroUsdc: activeRes,
       periodStartTimestamp: agent.period_start_timestamp,
       consecutiveErrors: agent.consecutive_errors,
       recentCallTimestamps: rateCalls.map((r) => r.timestamp),
@@ -1122,5 +1194,728 @@ export class SqliteLedger {
     if (this.db) {
       this.db.close();
     }
+  }
+
+  failNextCommit(): void {
+    this.commitShouldFail = true;
+  }
+
+  private sumPendingReservations(agentId: string): bigint {
+    const rows = this.db!.prepare(
+      `SELECT reserved_amount_micro_usdc FROM reservations WHERE agent_id = ? AND status = 'PENDING'`
+    ).all(agentId) as Array<{ reserved_amount_micro_usdc: string }>;
+    let total = 0n;
+    for (const row of rows) total += parseStoredMicroUsdc(row.reserved_amount_micro_usdc);
+    return total;
+  }
+
+  claimExecution(input: {
+    agentId: string;
+    vendor: string;
+    method: string;
+    path: string;
+    fingerprint: string;
+    idempotencyKey: string;
+    estimatedCostMicroUsdc: bigint;
+    reservedAmountMicroUsdc: bigint;
+    declaredCostMicroUsdc?: bigint;
+    timestamp: number;
+  }):
+    | {
+        kind: 'execute';
+        operationId: string;
+        reservationId: string;
+        estimatedMicroUsdc: bigint;
+        reservedMicroUsdc: bigint;
+        correlationId: string;
+        policyVersion: number;
+      }
+    | { kind: 'replay'; httpStatus: number; body: Record<string, unknown> }
+    | { kind: 'in_progress'; operationId: string }
+    | { kind: 'conflict' }
+    | { kind: 'rejected'; httpStatus: number; body: Record<string, unknown> } {
+    if (this.isFallback || !this.db) {
+      return {
+        kind: 'rejected',
+        httpStatus: 503,
+        body: { allowed: false, error: 'LEDGER_UNAVAILABLE', message: 'Persistent ledger is required.' },
+      };
+    }
+
+    const estimated = parseMicroUsdc(input.estimatedCostMicroUsdc);
+    const reserved = parseMicroUsdc(input.reservedAmountMicroUsdc);
+    if (!estimated.ok || !reserved.ok) {
+      const message = !estimated.ok ? estimated.message : !reserved.ok ? reserved.message : 'Amount rejected.';
+      return {
+        kind: 'rejected',
+        httpStatus: 400,
+        body: { allowed: false, error: 'AMOUNT_REJECTED', message },
+      };
+    }
+    let declared: bigint | undefined;
+    if (input.declaredCostMicroUsdc !== undefined) {
+      const parsed = parseMicroUsdc(input.declaredCostMicroUsdc);
+      if (!parsed.ok) {
+        return {
+          kind: 'rejected',
+          httpStatus: 400,
+          body: { allowed: false, error: 'AMOUNT_REJECTED', message: parsed.message },
+        };
+      }
+      declared = parsed.amount;
+    }
+
+    const now = input.timestamp;
+    this.db.exec('BEGIN IMMEDIATE;');
+    try {
+      const existing = this.db
+        .prepare('SELECT * FROM financial_operations WHERE agent_id = ? AND idempotency_key = ?')
+        .get(input.agentId, input.idempotencyKey) as any;
+      if (existing) {
+        if (existing.request_fingerprint !== input.fingerprint) {
+          this.db.exec('ROLLBACK;');
+          return { kind: 'conflict' };
+        }
+        if (
+          existing.state === 'EXECUTION_IN_PROGRESS' ||
+          existing.state === 'BUDGET_RESERVED' ||
+          existing.state === 'VENDOR_SUCCEEDED'
+        ) {
+          this.db.exec('ROLLBACK;');
+          return { kind: 'in_progress', operationId: existing.id };
+        }
+        const body = existing.result_json
+          ? (JSON.parse(existing.result_json) as Record<string, unknown>)
+          : {
+              error: existing.state,
+              operationId: existing.id,
+              fundsMoved: false,
+            };
+        const httpStatus = Number(existing.response_status ?? (existing.state === 'ACCOUNTING_COMMITTED' ? 200 : 409));
+        this.db.exec('ROLLBACK;');
+        return { kind: 'replay', httpStatus, body };
+      }
+
+      const agent = this.db.prepare('SELECT * FROM agents WHERE id = ?').get(input.agentId) as any;
+      const policy = this.db.prepare('SELECT * FROM policies WHERE agent_id = ?').get(input.agentId) as any;
+      const reject = (reason: string, message: string, status = 403) => {
+        const operationId = `op_${crypto.randomUUID()}`;
+        const correlationId = crypto.randomUUID();
+        const body = { allowed: false, error: 'POLICY_VIOLATION', reason, message, operationId, correlationId };
+        this.insertOperation({
+          id: operationId,
+          agentId: input.agentId,
+          idempotencyKey: input.idempotencyKey,
+          fingerprint: input.fingerprint,
+          vendor: input.vendor,
+          method: input.method,
+          path: input.path,
+          estimated: estimated.amount,
+          reserved: 0n,
+          state: 'POLICY_REJECTED',
+          reservationId: null,
+          correlationId,
+          policyVersion: policy ? Number(policy.version) : null,
+          decision: 'BLOCKED',
+          reason,
+          responseStatus: status,
+          result: body,
+          settlementStatus: 'NOT_SUBMITTED',
+          costBasis: 'UNAVAILABLE',
+          now,
+          ownerOrg: agent?.owner_org ?? '',
+          previousState: 'REQUEST_RECEIVED',
+        });
+        this.db!.exec('COMMIT;');
+        return { kind: 'rejected' as const, httpStatus: status, body };
+      };
+
+      if (!agent || !policy) {
+        this.db.exec('ROLLBACK;');
+        return {
+          kind: 'rejected',
+          httpStatus: 403,
+          body: { allowed: false, reason: 'AGENT_NOT_FOUND', message: 'Agent is not registered.' },
+        };
+      }
+      if (agent.status === 'AGENT_FROZEN') {
+        return reject('AGENT_FROZEN', agent.freeze_reason || 'Agent manually frozen');
+      }
+      if (agent.status === 'CIRCUIT_TRIPPED') {
+        return reject('CIRCUIT_BREAKER_TRIPPED', 'Circuit breaker tripped');
+      }
+
+      const allowedVendors: string[] = JSON.parse(policy.allowed_vendors_json);
+      const normalizedVendor = input.vendor.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+      const vendorAllowed = allowedVendors.some((vendor) => {
+        const clean = vendor.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+        return normalizedVendor === clean || normalizedVendor.endsWith(`.${clean}`);
+      });
+      if (!vendorAllowed) {
+        return reject('UNAPPROVED_VENDOR', `Vendor '${input.vendor}' is not in the agent whitelist.`);
+      }
+
+      const maxPerCall = parseStoredMicroUsdc(String(policy.max_per_call_micro_usdc));
+      if (reserved.amount > maxPerCall || (declared !== undefined && declared > maxPerCall)) {
+        return reject('PER_CALL_LIMIT_EXCEEDED', 'Request exceeds the single-call limit.');
+      }
+
+      const oneMinuteAgo = now - 60_000;
+      this.db.prepare('DELETE FROM rate_calls WHERE agent_id = ? AND timestamp < ?').run(input.agentId, oneMinuteAgo);
+      const callCount = this.db
+        .prepare('SELECT COUNT(*) as count FROM rate_calls WHERE agent_id = ? AND timestamp >= ?')
+        .get(input.agentId, oneMinuteAgo) as { count: number };
+      const recentCalls = Number(callCount?.count ?? 0) + 1;
+      if (recentCalls > Number(policy.max_calls_per_minute)) {
+        this.db
+          .prepare(`UPDATE agents SET status = 'CIRCUIT_TRIPPED', freeze_reason = ? WHERE id = ?`)
+          .run('High-frequency burst loop detected', input.agentId);
+        const rejected = reject('RATE_ANOMALY_LOOP_DETECTED', 'Call burst detected. Circuit breaker tripped.');
+        return rejected;
+      }
+
+      let currentPeriodSpend = parseStoredMicroUsdc(String(agent.current_period_spend_micro_usdc));
+      const periodStart = Number(agent.period_start_timestamp);
+      const periodDurationMs = Number(policy.period_seconds) * 1000;
+      if (now - periodStart >= periodDurationMs) {
+        currentPeriodSpend = 0n;
+        this.db
+          .prepare('UPDATE agents SET current_period_spend_micro_usdc = 0, period_start_timestamp = ? WHERE id = ?')
+          .run(now, input.agentId);
+      }
+
+      const activeReservations = this.sumPendingReservations(input.agentId);
+      const periodBudget = parseStoredMicroUsdc(String(policy.period_budget_micro_usdc));
+      if (currentPeriodSpend + activeReservations + reserved.amount > periodBudget) {
+        return reject(
+          'PERIOD_BUDGET_EXCEEDED',
+          `Request for ${reserved.amount} µUSDC would exceed the period budget.`
+        );
+      }
+
+      const reservationId = `res_${crypto.randomUUID()}`;
+      const operationId = `op_${crypto.randomUUID()}`;
+      const correlationId = crypto.randomUUID();
+      this.db
+        .prepare(
+          `INSERT INTO reservations (id, agent_id, idempotency_key, reserved_amount_micro_usdc, status, created_at, expires_at)
+           VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`
+        )
+        .run(reservationId, input.agentId, input.idempotencyKey, reserved.amount.toString(), now, now + 45_000);
+      this.db.prepare('INSERT INTO rate_calls (agent_id, timestamp) VALUES (?, ?)').run(input.agentId, now);
+
+      this.insertOperation({
+        id: operationId,
+        agentId: input.agentId,
+        idempotencyKey: input.idempotencyKey,
+        fingerprint: input.fingerprint,
+        vendor: input.vendor,
+        method: input.method,
+        path: input.path,
+        estimated: estimated.amount,
+        reserved: reserved.amount,
+        state: 'BUDGET_RESERVED',
+        reservationId,
+        correlationId,
+        policyVersion: Number(policy.version),
+        decision: 'ALLOWED',
+        reason: null,
+        responseStatus: null,
+        result: null,
+        settlementStatus: 'NOT_SUBMITTED',
+        costBasis: 'ESTIMATED',
+        now,
+        ownerOrg: agent.owner_org,
+        previousState: 'REQUEST_RECEIVED',
+      });
+      assertTransition('BUDGET_RESERVED', 'EXECUTION_IN_PROGRESS');
+      this.db
+        .prepare(`UPDATE financial_operations SET state = 'EXECUTION_IN_PROGRESS', updated_at = ? WHERE id = ?`)
+        .run(now, operationId);
+      this.auditFinancial({
+        agentId: input.agentId,
+        idempotencyKey: input.idempotencyKey,
+        fingerprint: input.fingerprint,
+        vendor: input.vendor,
+        state: 'EXECUTION_IN_PROGRESS',
+        previousState: 'BUDGET_RESERVED',
+        estimated: estimated.amount.toString(),
+        reserved: reserved.amount.toString(),
+        actual: null,
+        costBasis: 'ESTIMATED',
+        reservationId,
+        settlementStatus: 'NOT_SUBMITTED',
+        operationId,
+        correlationId,
+        ownerOrg: agent.owner_org,
+        policyVersion: Number(policy.version),
+        decision: 'ALLOWED',
+        reason: undefined,
+        now,
+      });
+      this.db.exec('COMMIT;');
+      return {
+        kind: 'execute',
+        operationId,
+        reservationId,
+        estimatedMicroUsdc: estimated.amount,
+        reservedMicroUsdc: reserved.amount,
+        correlationId,
+        policyVersion: Number(policy.version),
+      };
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK;');
+      } catch {
+        // The transaction may already have been closed by an earlier rollback.
+      }
+      return {
+        kind: 'rejected',
+        httpStatus: 503,
+        body: {
+          allowed: false,
+          error: 'LEDGER_UNAVAILABLE',
+          message: error instanceof Error ? error.message : 'Reservation failed.',
+        },
+      };
+    }
+  }
+
+  private insertOperation(input: {
+    id: string;
+    agentId: string;
+    idempotencyKey: string;
+    fingerprint: string;
+    vendor: string;
+    method: string;
+    path: string;
+    estimated: bigint;
+    reserved: bigint;
+    state: TransactionLifecycleState;
+    reservationId: string | null;
+    correlationId: string;
+    policyVersion: number | null;
+    decision: 'ALLOWED' | 'BLOCKED';
+    reason: string | null;
+    responseStatus: number | null;
+    result: Record<string, unknown> | null;
+    settlementStatus: string;
+    costBasis: CostBasis;
+    now: number;
+    ownerOrg: string;
+    previousState: TransactionLifecycleState;
+  }): void {
+    assertTransition(input.previousState, input.state);
+    this.db!.prepare(
+      `INSERT INTO financial_operations (
+        id, agent_id, idempotency_key, idempotency_ref, request_fingerprint, vendor, method, path,
+        estimated_cost_micro_usdc, reserved_amount_micro_usdc, actual_cost_micro_usdc, cost_basis,
+        state, reservation_id, correlation_id, policy_version, decision, reason, response_status,
+        result_json, settlement_status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      input.id,
+      input.agentId,
+      input.idempotencyKey,
+      idempotencyReference(input.idempotencyKey),
+      input.fingerprint,
+      input.vendor,
+      input.method,
+      input.path,
+      input.estimated.toString(),
+      input.reserved.toString(),
+      input.costBasis,
+      input.state,
+      input.reservationId,
+      input.correlationId,
+      input.policyVersion,
+      input.decision,
+      input.reason,
+      input.responseStatus,
+      input.result ? JSON.stringify(input.result).slice(0, 16_000) : null,
+      input.settlementStatus,
+      input.now,
+      input.now
+    );
+    this.auditFinancial({
+      agentId: input.agentId,
+      idempotencyKey: input.idempotencyKey,
+      fingerprint: input.fingerprint,
+      vendor: input.vendor,
+      state: input.state,
+      previousState: input.previousState,
+      estimated: input.estimated.toString(),
+      reserved: input.reserved.toString(),
+      actual: null,
+      costBasis: input.costBasis,
+      reservationId: input.reservationId,
+      settlementStatus: input.settlementStatus,
+      operationId: input.id,
+      correlationId: input.correlationId,
+      ownerOrg: input.ownerOrg,
+      policyVersion: input.policyVersion,
+      decision: input.decision,
+      reason: input.reason ?? undefined,
+      now: input.now,
+    });
+  }
+
+  private auditFinancial(input: {
+    agentId: string;
+    idempotencyKey: string;
+    fingerprint: string;
+    vendor: string;
+    state: TransactionLifecycleState;
+    previousState: TransactionLifecycleState;
+    estimated: string;
+    reserved: string;
+    actual: string | null;
+    costBasis: CostBasis;
+    reservationId: string | null;
+    settlementStatus: string;
+    operationId: string;
+    correlationId: string;
+    ownerOrg: string;
+    policyVersion: number | null;
+    decision: 'ALLOWED' | 'BLOCKED';
+    reason?: string;
+    now: number;
+  }): void {
+    this.recordAuditEventSync({
+      eventId: crypto.randomUUID(),
+      actor: `agent:${input.agentId}`,
+      agentId: input.agentId,
+      action: 'financial.transition',
+      decision: input.decision,
+      reason: input.reason,
+      timestamp: input.now,
+      correlationId: input.correlationId,
+      detailsJson: JSON.stringify({
+        operationId: input.operationId,
+        organizationId: input.ownerOrg,
+        idempotencyRef: idempotencyReference(input.idempotencyKey),
+        requestFingerprint: input.fingerprint,
+        vendor: input.vendor,
+        lifecycleState: input.state,
+        previousState: input.previousState,
+        estimatedCostMicroUsdc: input.estimated,
+        reservedAmountMicroUsdc: input.reserved,
+        actualCostMicroUsdc: input.actual,
+        costBasis: input.costBasis,
+        reservationId: input.reservationId,
+        settlementStatus: input.settlementStatus,
+        policyVersion: input.policyVersion,
+        fundsMoved: false,
+      }),
+    });
+  }
+
+  finishExecution(
+    operationId: string,
+    outcome:
+      | { type: 'succeeded'; httpStatus: number; result: Record<string, unknown> }
+      | { type: 'failed'; httpStatus: number; result: Record<string, unknown>; reason: string }
+      | { type: 'unknown'; reason: string }
+  ): { ok: boolean; httpStatus: number; body: Record<string, unknown> } {
+    if (!this.db) {
+      return { ok: false, httpStatus: 503, body: { error: 'LEDGER_UNAVAILABLE', fundsMoved: false } };
+    }
+    const current = this.db.prepare('SELECT * FROM financial_operations WHERE id = ?').get(operationId) as any;
+    if (!current || current.state !== 'EXECUTION_IN_PROGRESS') {
+      return {
+        ok: false,
+        httpStatus: 409,
+        body: { error: 'RECONCILIATION_REQUIRED', operationId, fundsMoved: false },
+      };
+    }
+
+    if (outcome.type === 'unknown') {
+      this.moveOperation(current, 'EXECUTION_OUTCOME_UNKNOWN', {
+        reason: outcome.reason,
+        responseStatus: 504,
+        result: {
+          error: 'UPSTREAM_OUTCOME_UNKNOWN',
+          message: outcome.reason,
+          operationId,
+          reconciliationRequired: true,
+          fundsMoved: false,
+        },
+        settlementStatus: 'NOT_SUBMITTED',
+        costBasis: 'UNAVAILABLE',
+        decision: 'BLOCKED',
+      });
+      this.moveOperation(
+        { ...current, state: 'EXECUTION_OUTCOME_UNKNOWN' },
+        'RECONCILIATION_REQUIRED',
+        {
+          reason: outcome.reason,
+          responseStatus: 504,
+          result: {
+            error: 'RECONCILIATION_REQUIRED',
+            message: outcome.reason,
+            operationId,
+            reconciliationRequired: true,
+            fundsMoved: false,
+          },
+          settlementStatus: 'NOT_SUBMITTED',
+          costBasis: 'UNAVAILABLE',
+          decision: 'BLOCKED',
+        }
+      );
+      return {
+        ok: false,
+        httpStatus: 504,
+        body: {
+          error: 'RECONCILIATION_REQUIRED',
+          message: outcome.reason,
+          operationId,
+          reconciliationRequired: true,
+          fundsMoved: false,
+        },
+      };
+    }
+
+    if (outcome.type === 'failed') {
+      const released = this.rollbackReservation(current.reservation_id, outcome.reason);
+      if (!released) {
+        this.moveOperation(current, 'EXECUTION_OUTCOME_UNKNOWN', {
+          reason: 'ROLLBACK_FAILED',
+          responseStatus: 500,
+          result: { error: 'RECONCILIATION_REQUIRED', operationId, fundsMoved: false },
+          settlementStatus: 'NOT_SUBMITTED',
+          costBasis: 'UNAVAILABLE',
+          decision: 'BLOCKED',
+        });
+        this.moveOperation({ ...current, state: 'EXECUTION_OUTCOME_UNKNOWN' }, 'RECONCILIATION_REQUIRED', {
+          reason: 'ROLLBACK_FAILED',
+          responseStatus: 500,
+          result: { error: 'RECONCILIATION_REQUIRED', operationId, fundsMoved: false },
+          settlementStatus: 'NOT_SUBMITTED',
+          costBasis: 'UNAVAILABLE',
+          decision: 'BLOCKED',
+        });
+        return { ok: false, httpStatus: 500, body: { error: 'RECONCILIATION_REQUIRED', operationId, fundsMoved: false } };
+      }
+      const body = { ...outcome.result, operationId, fundsMoved: false, costBasis: 'UNAVAILABLE' };
+      this.moveOperation(current, 'VENDOR_FAILED', {
+        reason: outcome.reason,
+        responseStatus: outcome.httpStatus,
+        result: body,
+        settlementStatus: 'NOT_SUBMITTED',
+        costBasis: 'UNAVAILABLE',
+        decision: 'BLOCKED',
+      });
+      return { ok: true, httpStatus: outcome.httpStatus, body };
+    }
+
+    const reserved = parseStoredMicroUsdc(String(current.reserved_amount_micro_usdc));
+    const committed = this.commitReservation(current.reservation_id, reserved);
+    if (!committed) {
+      this.moveOperation(current, 'VENDOR_SUCCEEDED', {
+        reason: 'ACCOUNTING_COMMIT_FAILED',
+        responseStatus: 500,
+        result: { success: false, error: 'ACCOUNTING_FAILED', operationId, fundsMoved: false },
+        settlementStatus: 'NOT_SUBMITTED',
+        costBasis: 'ESTIMATED',
+        decision: 'BLOCKED',
+      });
+      this.moveOperation({ ...current, state: 'VENDOR_SUCCEEDED' }, 'RECONCILIATION_REQUIRED', {
+        reason: 'ACCOUNTING_COMMIT_FAILED',
+        responseStatus: 500,
+        result: { success: false, error: 'ACCOUNTING_FAILED', operationId, fundsMoved: false, reconciliationRequired: true },
+        settlementStatus: 'NOT_SUBMITTED',
+        costBasis: 'ESTIMATED',
+        decision: 'BLOCKED',
+      });
+      return {
+        ok: false,
+        httpStatus: 500,
+        body: { success: false, error: 'ACCOUNTING_FAILED', operationId, fundsMoved: false, reconciliationRequired: true },
+      };
+    }
+
+    const body: Record<string, unknown> = {
+      ...outcome.result,
+      success: true,
+      operationId,
+      fundsMoved: false,
+      costBasis: 'ESTIMATED',
+    };
+    this.moveOperation(current, 'VENDOR_SUCCEEDED', {
+      reason: null,
+      responseStatus: outcome.httpStatus,
+      result: body,
+      settlementStatus: 'NOT_SUBMITTED',
+      costBasis: 'ESTIMATED',
+      decision: 'ALLOWED',
+    });
+    this.moveOperation({ ...current, state: 'VENDOR_SUCCEEDED' }, 'ACCOUNTING_COMMITTED', {
+      reason: null,
+      responseStatus: outcome.httpStatus,
+      result: body,
+      settlementStatus: 'NOT_SUBMITTED',
+      costBasis: 'ESTIMATED',
+      decision: 'ALLOWED',
+    });
+    return { ok: true, httpStatus: outcome.httpStatus, body };
+  }
+
+  private moveOperation(
+    current: any,
+    next: TransactionLifecycleState,
+    patch: {
+      reason: string | null;
+      responseStatus: number;
+      result: Record<string, unknown>;
+      settlementStatus: string;
+      costBasis: CostBasis;
+      decision: 'ALLOWED' | 'BLOCKED';
+    }
+  ): void {
+    assertTransition(current.state as TransactionLifecycleState, next);
+    const now = Date.now();
+    this.db!.exec('BEGIN IMMEDIATE;');
+    try {
+      const fresh = this.db!.prepare('SELECT state FROM financial_operations WHERE id = ?').get(current.id) as
+        | { state: TransactionLifecycleState }
+        | undefined;
+      if (!fresh || fresh.state !== current.state) {
+        this.db!.exec('ROLLBACK;');
+        throw new Error(`Operation ${current.id} changed before ${current.state} -> ${next}`);
+      }
+      this.db!.prepare(
+        `UPDATE financial_operations
+         SET state = ?, reason = ?, response_status = ?, result_json = ?, settlement_status = ?,
+             cost_basis = ?, decision = ?, updated_at = ?
+         WHERE id = ? AND state = ?`
+      ).run(
+        next,
+        patch.reason,
+        patch.responseStatus,
+        JSON.stringify(patch.result).slice(0, 16_000),
+        patch.settlementStatus,
+        patch.costBasis,
+        patch.decision,
+        now,
+        current.id,
+        current.state
+      );
+      const owner = this.db!.prepare('SELECT owner_org FROM agents WHERE id = ?').get(current.agent_id) as
+        | { owner_org: string }
+        | undefined;
+      this.auditFinancial({
+        agentId: current.agent_id,
+        idempotencyKey: current.idempotency_key,
+        fingerprint: current.request_fingerprint,
+        vendor: current.vendor,
+        state: next,
+        previousState: current.state,
+        estimated: String(current.estimated_cost_micro_usdc),
+        reserved: String(current.reserved_amount_micro_usdc),
+        actual: null,
+        costBasis: patch.costBasis,
+        reservationId: current.reservation_id,
+        settlementStatus: patch.settlementStatus,
+        operationId: current.id,
+        correlationId: current.correlation_id,
+        ownerOrg: owner?.owner_org ?? '',
+        policyVersion: current.policy_version,
+        decision: patch.decision,
+        reason: patch.reason ?? undefined,
+        now,
+      });
+      this.db!.exec('COMMIT;');
+    } catch (error) {
+      try {
+        this.db!.exec('ROLLBACK;');
+      } catch {
+        // already closed
+      }
+      throw error;
+    }
+  }
+
+  recoverInFlightOperations(now = Date.now()): number {
+    if (!this.db) return 0;
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM financial_operations WHERE state IN (${IN_FLIGHT_STATES.map(() => '?').join(', ')})`
+      )
+      .all(...IN_FLIGHT_STATES) as any[];
+    let recovered = 0;
+    for (const row of rows) {
+      const reason = 'Recovered after process restart. Upstream outcome was not replayed.';
+      if (row.state === 'BUDGET_RESERVED') {
+        this.moveOperation(row, 'EXECUTION_IN_PROGRESS', {
+          reason,
+          responseStatus: 409,
+          result: { error: 'RECONCILIATION_REQUIRED', operationId: row.id, fundsMoved: false },
+          settlementStatus: 'NOT_SUBMITTED',
+          costBasis: 'UNAVAILABLE',
+          decision: 'BLOCKED',
+        });
+        row.state = 'EXECUTION_IN_PROGRESS';
+      }
+      if (row.state === 'EXECUTION_IN_PROGRESS') {
+        this.moveOperation(row, 'EXECUTION_OUTCOME_UNKNOWN', {
+          reason,
+          responseStatus: 409,
+          result: { error: 'RECONCILIATION_REQUIRED', operationId: row.id, fundsMoved: false, reconciliationRequired: true },
+          settlementStatus: 'NOT_SUBMITTED',
+          costBasis: 'UNAVAILABLE',
+          decision: 'BLOCKED',
+        });
+        row.state = 'EXECUTION_OUTCOME_UNKNOWN';
+      }
+      if (row.state === 'EXECUTION_OUTCOME_UNKNOWN' || row.state === 'VENDOR_SUCCEEDED') {
+        this.moveOperation(row, 'RECONCILIATION_REQUIRED', {
+          reason,
+          responseStatus: 409,
+          result: {
+            error: 'RECONCILIATION_REQUIRED',
+            operationId: row.id,
+            message: reason,
+            fundsMoved: false,
+            reconciliationRequired: true,
+            recoveredAt: now,
+          },
+          settlementStatus: 'NOT_SUBMITTED',
+          costBasis: 'UNAVAILABLE',
+          decision: 'BLOCKED',
+        });
+        recovered += 1;
+      }
+    }
+    return recovered;
+  }
+
+  listReconciliation(ownerOrg: string): Array<Record<string, unknown>> {
+    if (!this.db) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT o.*, a.owner_org FROM financial_operations o
+         JOIN agents a ON a.id = o.agent_id
+         WHERE a.owner_org = ? AND o.state = 'RECONCILIATION_REQUIRED'
+         ORDER BY o.updated_at ASC`
+      )
+      .all(ownerOrg) as any[];
+    return rows.map((row) => ({
+      operationId: row.id,
+      agentId: row.agent_id,
+      organizationId: row.owner_org,
+      idempotencyRef: row.idempotency_ref,
+      requestFingerprint: row.request_fingerprint,
+      vendor: row.vendor,
+      state: row.state,
+      reservationId: row.reservation_id,
+      estimatedCostMicroUsdc: row.estimated_cost_micro_usdc,
+      reservedAmountMicroUsdc: row.reserved_amount_micro_usdc,
+      actualCostMicroUsdc: row.actual_cost_micro_usdc,
+      costBasis: row.cost_basis,
+      settlementStatus: row.settlement_status,
+      reason: row.reason,
+      correlationId: row.correlation_id,
+      updatedAt: row.updated_at,
+    }));
   }
 }
