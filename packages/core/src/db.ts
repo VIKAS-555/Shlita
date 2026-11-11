@@ -221,6 +221,25 @@ export class SqliteLedger {
       );
       CREATE INDEX IF NOT EXISTS idx_operations_state ON financial_operations(state);
     `);
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS chain_settlements (
+        id TEXT PRIMARY KEY,
+        operation_id TEXT NOT NULL UNIQUE,
+        organization_id TEXT NOT NULL,
+        destination TEXT NOT NULL,
+        mint TEXT NOT NULL,
+        amount_micro_usdc TEXT NOT NULL,
+        cluster TEXT NOT NULL,
+        status TEXT NOT NULL,
+        signature TEXT,
+        slot INTEGER,
+        error TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (operation_id) REFERENCES financial_operations(id)
+      );
+    `);
   }
 
   private ensureAgentCredentialColumns(): void {
@@ -1917,5 +1936,116 @@ export class SqliteLedger {
       correlationId: row.correlation_id,
       updatedAt: row.updated_at,
     }));
+  }
+
+  claimChainSettlement(input: {
+    operationId: string;
+    ownerOrg: string;
+    destination: string;
+    amountMicroUsdc: bigint;
+    mint: string;
+    cluster: string;
+  }):
+    | { ok: true; replay: boolean; settlement: Record<string, unknown> }
+    | { ok: false; httpStatus: number; error: string; message: string } {
+    if (!this.db) return { ok: false, httpStatus: 503, error: 'LEDGER_UNAVAILABLE', message: 'Persistent ledger is required.' };
+    this.db.exec('BEGIN IMMEDIATE;');
+    try {
+      const operation = this.db
+        .prepare(
+          `SELECT o.*, a.owner_org FROM financial_operations o
+           JOIN agents a ON a.id = o.agent_id WHERE o.id = ?`
+        )
+        .get(input.operationId) as any;
+      if (!operation || operation.owner_org !== input.ownerOrg) {
+        this.db.exec('ROLLBACK;');
+        return { ok: false, httpStatus: 404, error: 'NOT_FOUND', message: 'Operation was not found.' };
+      }
+      const existing = this.db.prepare('SELECT * FROM chain_settlements WHERE operation_id = ?').get(input.operationId) as any;
+      if (existing) {
+        this.db.exec('COMMIT;');
+        return { ok: true, replay: true, settlement: this.presentSettlement(existing) };
+      }
+      if (operation.state !== 'ACCOUNTING_COMMITTED') {
+        this.db.exec('ROLLBACK;');
+        return { ok: false, httpStatus: 409, error: 'NOT_SETTLEABLE', message: 'The operation is not an unpaid accounting commitment.' };
+      }
+      if (input.amountMicroUsdc.toString() !== operation.reserved_amount_micro_usdc) {
+        this.db.exec('ROLLBACK;');
+        return { ok: false, httpStatus: 409, error: 'AMOUNT_MISMATCH', message: 'Settlement amount must equal the reserved amount.' };
+      }
+      assertTransition(operation.state, 'SETTLEMENT_PREPARED');
+      const now = Date.now();
+      const id = `set_${crypto.randomUUID()}`;
+      this.db.prepare(
+        `INSERT INTO chain_settlements (
+          id, operation_id, organization_id, destination, mint, amount_micro_usdc, cluster, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'SETTLEMENT_PREPARED', ?, ?)`
+      ).run(id, input.operationId, input.ownerOrg, input.destination, input.mint, input.amountMicroUsdc.toString(), input.cluster, now, now);
+      this.db.prepare(
+        `UPDATE financial_operations SET state = 'SETTLEMENT_PREPARED', settlement_status = 'PREPARED', updated_at = ? WHERE id = ? AND state = 'ACCOUNTING_COMMITTED'`
+      ).run(now, input.operationId);
+      this.db.exec('COMMIT;');
+      const stored = this.db.prepare('SELECT * FROM chain_settlements WHERE id = ?').get(id) as any;
+      return { ok: true, replay: false, settlement: this.presentSettlement(stored) };
+    } catch (error) {
+      try { this.db.exec('ROLLBACK;'); } catch { /* already closed */ }
+      const existing = this.db.prepare('SELECT * FROM chain_settlements WHERE operation_id = ?').get(input.operationId) as any;
+      if (existing) return { ok: true, replay: true, settlement: this.presentSettlement(existing) };
+      return { ok: false, httpStatus: 503, error: 'LEDGER_UNAVAILABLE', message: error instanceof Error ? error.message : 'Settlement claim failed.' };
+    }
+  }
+
+  noteChainSettlement(
+    operationId: string,
+    patch: { status: TransactionLifecycleState; signature?: string; slot?: number; error?: string }
+  ): { ok: true; settlement: Record<string, unknown> } | { ok: false; httpStatus: number; error: string; message: string } {
+    if (!this.db) return { ok: false, httpStatus: 503, error: 'LEDGER_UNAVAILABLE', message: 'Persistent ledger is required.' };
+    this.db.exec('BEGIN IMMEDIATE;');
+    try {
+      const operation = this.db.prepare('SELECT state FROM financial_operations WHERE id = ?').get(operationId) as { state: TransactionLifecycleState } | undefined;
+      const current = this.db.prepare('SELECT * FROM chain_settlements WHERE operation_id = ?').get(operationId) as any;
+      if (!operation || !current) {
+        this.db.exec('ROLLBACK;');
+        return { ok: false, httpStatus: 404, error: 'NOT_FOUND', message: 'Settlement was not found.' };
+      }
+      if (current.signature && patch.signature && current.signature !== patch.signature) {
+        this.db.exec('ROLLBACK;');
+        return { ok: false, httpStatus: 409, error: 'SIGNATURE_CONFLICT', message: 'A different signature is already stored for this settlement.' };
+      }
+      assertTransition(operation.state, patch.status);
+      const now = Date.now();
+      this.db.prepare(
+        `UPDATE chain_settlements
+         SET status = ?, signature = COALESCE(?, signature), slot = COALESCE(?, slot), error = ?, updated_at = ?
+         WHERE operation_id = ?`
+      ).run(patch.status, patch.signature ?? null, patch.slot ?? null, patch.error ?? null, now, operationId);
+      this.db.prepare(
+        `UPDATE financial_operations SET state = ?, settlement_status = ?, updated_at = ? WHERE id = ? AND state = ?`
+      ).run(patch.status, patch.status, now, operationId, operation.state);
+      this.db.exec('COMMIT;');
+      const stored = this.db.prepare('SELECT * FROM chain_settlements WHERE operation_id = ?').get(operationId) as any;
+      return { ok: true, settlement: this.presentSettlement(stored) };
+    } catch (error) {
+      try { this.db.exec('ROLLBACK;'); } catch { /* already closed */ }
+      return { ok: false, httpStatus: 409, error: 'ILLEGAL_SETTLEMENT_TRANSITION', message: error instanceof Error ? error.message : 'Settlement update rejected.' };
+    }
+  }
+
+  private presentSettlement(row: any): Record<string, unknown> {
+    return {
+      settlementId: row.id,
+      operationId: row.operation_id,
+      organizationId: row.organization_id,
+      destination: row.destination,
+      mint: row.mint,
+      amountMicroUsdc: row.amount_micro_usdc,
+      cluster: row.cluster,
+      status: row.status,
+      signature: row.signature,
+      slot: row.slot,
+      error: row.error,
+      fundsMoved: row.status === 'SETTLEMENT_CONFIRMED' || row.status === 'SETTLEMENT_FINALIZED',
+    };
   }
 }

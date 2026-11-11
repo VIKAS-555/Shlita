@@ -56,16 +56,22 @@ export function bootFromEnv(env: Record<string, string | undefined>): BootSucces
     enrollDemoAgents(engine, config);
   }
 
+  const allowMainnet = env.SHLITA_ALLOW_MAINNET === 'true' && env.SOLANA_NETWORK === 'mainnet-beta';
+  if (env.SOLANA_NETWORK === 'mainnet-beta' && !allowMainnet) {
+    return { ok: false, errors: ['Mainnet settlement is disabled.'] };
+  }
   const settlementManager = new SolanaSettlementManager(
-    env.SOLANA_RPC_URL || 'https://api.devnet.solana.com',
+    env.SOLANA_RPC_URL || 'http://127.0.0.1:8899',
     undefined,
-    env.SOLANA_NETWORK === 'mainnet-beta'
+    allowMainnet
   );
 
   const app = createGatewayApp(engine, settlementManager, {
     operators: [{ key: config.operatorKey, ownerOrg: config.operatorOrg }],
     allowSimulation: config.allowSimulation,
     corsOrigins: config.corsOrigins,
+    settlementEnabled: env.SHLITA_SETTLEMENT_ENABLED === 'true',
+    settlementDestination: env.SHLITA_SETTLEMENT_DESTINATION,
   });
 
   return { ok: true, app, engine, config: { ...config, dbPath } };

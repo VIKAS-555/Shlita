@@ -5,11 +5,7 @@ import {
   Transaction,
   TransactionInstruction,
 } from '@solana/web3.js';
-import {
-  createTransferCheckedInstruction,
-  getAssociatedTokenAddressSync,
-  TOKEN_PROGRAM_ID,
-} from '@solana/spl-token';
+import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import {
   PROGRAM_ID as CANONICAL_SUBSCRIPTIONS_PROGRAM_ID,
   findSubscriptionAuthorityPda,
@@ -49,9 +45,10 @@ export interface PreparedSettlement {
   delegationBump?: number;
   eventAuthority?: string;
   usdcMint: string;
-  cluster: 'devnet' | 'mainnet-beta';
+  cluster: 'localnet' | 'devnet' | 'mainnet-beta';
   status: TransactionLifecycleState;
   explorerUrl?: string;
+  finality?: 'confirmed' | 'finalized';
 }
 
 export class SolanaSettlementManager {
@@ -62,11 +59,15 @@ export class SolanaSettlementManager {
   private isMainnet: boolean;
 
   constructor(
-    rpcUrl = 'https://api.devnet.solana.com',
+    rpcUrl = 'http://127.0.0.1:8899',
     payerKeypair?: Keypair,
-    isMainnet = false
+    isMainnet = false,
+    connection?: Connection
   ) {
-    this.connection = new Connection(rpcUrl, 'confirmed');
+    if (isMainnet && process.env.SHLITA_ALLOW_MAINNET !== 'true') {
+      throw new Error('Mainnet settlement is disabled.');
+    }
+    this.connection = connection ?? new Connection(rpcUrl, 'confirmed');
     this.operatorKeypair = payerKeypair;
     this.isMainnet = isMainnet;
     this.usdcMint = isMainnet ? USDC_MINT_MAINNET : USDC_MINT_DEVNET;
@@ -81,8 +82,11 @@ export class SolanaSettlementManager {
     return this.usdcMint;
   }
 
-  getCluster(): 'devnet' | 'mainnet-beta' {
-    return this.isMainnet ? 'mainnet-beta' : 'devnet';
+  getCluster(): 'localnet' | 'devnet' | 'mainnet-beta' {
+    if (this.isMainnet) return 'mainnet-beta';
+    const endpoint = (this.connection as Connection & { rpcEndpoint?: string }).rpcEndpoint ?? '';
+    if (endpoint.includes('devnet')) return 'devnet';
+    return 'localnet';
   }
 
   getOperatorPublicKey(): PublicKey | undefined {
@@ -97,19 +101,11 @@ export class SolanaSettlementManager {
     user: PublicKey,
     mint: PublicKey = this.usdcMint
   ): Promise<[PublicKey, number]> {
-    try {
-      const [address, bump] = await findSubscriptionAuthorityPda({
-        user: user.toBase58() as any,
-        tokenMint: mint.toBase58() as any,
-      });
-      return [new PublicKey(address), bump];
-    } catch {
-      // Fallback to direct derivation using official seeds
-      return PublicKey.findProgramAddressSync(
-        [Buffer.from('SubscriptionAuthority'), user.toBuffer(), mint.toBuffer()],
-        this.programId
-      );
-    }
+    const [address, bump] = await findSubscriptionAuthorityPda({
+      user: user.toBase58() as any,
+      tokenMint: mint.toBase58() as any,
+    });
+    return [new PublicKey(address), bump];
   }
 
   /**
@@ -122,43 +118,21 @@ export class SolanaSettlementManager {
     delegatee: PublicKey,
     nonce = 0n
   ): Promise<[PublicKey, number]> {
-    try {
-      const [address, bump] = await findFixedDelegationPda({
-        subscriptionAuthority: subscriptionAuthority.toBase58() as any,
-        delegator: delegator.toBase58() as any,
-        delegatee: delegatee.toBase58() as any,
-        nonce,
-      });
-      return [new PublicKey(address), bump];
-    } catch {
-      const nonceBuf = Buffer.alloc(8);
-      nonceBuf.writeBigUInt64LE(nonce);
-      return PublicKey.findProgramAddressSync(
-        [
-          Buffer.from('delegation'),
-          subscriptionAuthority.toBuffer(),
-          delegator.toBuffer(),
-          delegatee.toBuffer(),
-          nonceBuf,
-        ],
-        this.programId
-      );
-    }
+    const [address, bump] = await findFixedDelegationPda({
+      subscriptionAuthority: subscriptionAuthority.toBase58() as any,
+      delegator: delegator.toBase58() as any,
+      delegatee: delegatee.toBase58() as any,
+      nonce,
+    });
+    return [new PublicKey(address), bump];
   }
 
   /**
    * Derives Event Authority PDA for official Subscriptions program
    */
   async deriveEventAuthorityPda(): Promise<[PublicKey, number]> {
-    try {
-      const [address, bump] = await findEventAuthorityPda();
-      return [new PublicKey(address), bump];
-    } catch {
-      return PublicKey.findProgramAddressSync(
-        [Buffer.from('__event_authority')],
-        this.programId
-      );
-    }
+    const [address, bump] = await findEventAuthorityPda();
+    return [new PublicKey(address), bump];
   }
 
   /**
@@ -169,7 +143,13 @@ export class SolanaSettlementManager {
     subscriber: PublicKey,
     merchant: PublicKey,
     amountMicroUsdc: bigint,
-    options: { nonce?: bigint } = {}
+    options: {
+      nonce?: bigint;
+      allowanceMicroUsdc?: bigint;
+      expiryTs?: bigint;
+      nowTs?: bigint;
+      decimals?: number;
+    } = {}
   ): Promise<PreparedSettlement> {
     if (amountMicroUsdc <= 0n) {
       throw new Error('Settlement amount must be a positive integer in micro-USDC');
@@ -177,91 +157,56 @@ export class SolanaSettlementManager {
     if (amountMicroUsdc > 18446744073709551615n) {
       throw new Error('Settlement amount exceeds u64 maximum base units');
     }
+    if (options.decimals !== undefined && options.decimals !== 6) {
+      throw new Error('Only a 6-decimal mint is accepted for USDC settlement.');
+    }
+    if (options.allowanceMicroUsdc !== undefined && amountMicroUsdc > options.allowanceMicroUsdc) {
+      throw new Error('Settlement amount exceeds the authorized delegation allowance.');
+    }
+    if (
+      options.expiryTs !== undefined &&
+      options.nowTs !== undefined &&
+      options.nowTs >= options.expiryTs
+    ) {
+      throw new Error('Delegation has expired.');
+    }
 
-    const [pdaAuthority, bump] = await this.deriveSubscriptionAuthorityPda(
-      subscriber,
-      this.usdcMint
-    );
-
+    const delegatee = merchant;
+    const [pdaAuthority, bump] = await this.deriveSubscriptionAuthorityPda(subscriber, this.usdcMint);
     const [delegationPda, delBump] = await this.deriveFixedDelegationPda(
       pdaAuthority,
       subscriber,
-      merchant,
+      delegatee,
       options.nonce ?? 0n
     );
-
     const [eventAuthority] = await this.deriveEventAuthorityPda();
+    const subscriberAta = getAssociatedTokenAddressSync(this.usdcMint, subscriber, true);
+    const merchantAta = getAssociatedTokenAddressSync(this.usdcMint, merchant, true);
 
-    // Associated Token Addresses for USDC
-    const subscriberAta = getAssociatedTokenAddressSync(
-      this.usdcMint,
-      subscriber,
-      true
-    );
+    const instruction = getTransferFixedInstruction({
+      delegationPda: delegationPda.toBase58() as any,
+      subscriptionAuthority: pdaAuthority.toBase58() as any,
+      delegatorAta: subscriberAta.toBase58() as any,
+      receiverAta: merchantAta.toBase58() as any,
+      tokenMint: this.usdcMint.toBase58() as any,
+      tokenProgram: TOKEN_PROGRAM_ID.toBase58() as any,
+      delegatee: addressSigner(delegatee),
+      eventAuthority: eventAuthority.toBase58() as any,
+      selfProgram: this.programId.toBase58() as any,
+      transferData: {
+        amount: amountMicroUsdc,
+        delegator: subscriber.toBase58() as any,
+        mint: this.usdcMint.toBase58() as any,
+      },
+    });
 
-    const merchantAta = getAssociatedTokenAddressSync(
-      this.usdcMint,
-      merchant,
-      true
-    );
-
-    const tx = new Transaction();
-
-    // 1. SPL Token Transfer Checked Instruction
-    // Direct transfer authorized by user or delegated by Subscriptions PDA
-    const splTransferIx = createTransferCheckedInstruction(
-      subscriberAta,
-      this.usdcMint,
-      merchantAta,
-      pdaAuthority,
-      amountMicroUsdc,
-      6
-    );
-    tx.add(splTransferIx);
-
-    // 2. Official Solana Subscriptions Program Delegation Instruction
-    try {
-      const subscriptionsIxDef = getTransferFixedInstruction({
-        delegationPda: delegationPda.toBase58() as any,
-        subscriptionAuthority: pdaAuthority.toBase58() as any,
-        delegatorAta: subscriberAta.toBase58() as any,
-        receiverAta: merchantAta.toBase58() as any,
-        tokenMint: this.usdcMint.toBase58() as any,
-        tokenProgram: TOKEN_PROGRAM_ID.toBase58() as any,
-        delegatee: merchant.toBase58() as any,
-        eventAuthority: eventAuthority.toBase58() as any,
-        transferData: {
-          amount: amountMicroUsdc,
-          delegator: subscriber.toBase58() as any,
-          mint: this.usdcMint.toBase58() as any,
-        },
-      });
-
-      const subscriptionsIx = new TransactionInstruction({
-        programId: this.programId,
-        keys: subscriptionsIxDef.accounts.map((a: any) => ({
-          pubkey: new PublicKey(a.address),
-          isSigner: (a.role & 2) === 2,
-          isWritable: (a.role & 1) === 1,
-        })),
-        data: Buffer.from(subscriptionsIxDef.data),
-      });
-
-      tx.add(subscriptionsIx);
-    } catch {
-      // Fallback instruction with verified anchor account layout
-    }
-
-    if (this.operatorKeypair) {
-      tx.feePayer = this.operatorKeypair.publicKey;
-    }
-
-    const amountUsdcFormatted = (Number(amountMicroUsdc) / 1_000_000).toFixed(6);
+    const tx = new Transaction().add(toWeb3Instruction(this.programId, instruction as never));
+    if (this.operatorKeypair) tx.feePayer = this.operatorKeypair.publicKey;
 
     return {
       transaction: tx,
       amountMicroUsdc,
-      amountUsdcFormatted,
+      amountUsdcFormatted: formatMicroUsdc(amountMicroUsdc),
       subscriberPubkey: subscriber.toBase58(),
       merchantPubkey: merchant.toBase58(),
       subscriberAta: subscriberAta.toBase58(),
@@ -272,105 +217,152 @@ export class SolanaSettlementManager {
       delegationBump: delBump,
       eventAuthority: eventAuthority.toBase58(),
       usdcMint: this.usdcMint.toBase58(),
-      cluster: this.isMainnet ? 'mainnet-beta' : 'devnet',
-      status: 'SETTLEMENT_PENDING',
+      cluster: this.getCluster(),
+      status: 'SETTLEMENT_PREPARED',
     };
   }
 
   /**
-   * Submits a real transaction to the configured Solana cluster and awaits RPC confirmation.
-   * Returns honest transaction states: SETTLEMENT_PENDING -> SETTLEMENT_CONFIRMED or SETTLEMENT_FAILED.
-   * Never fabricates synthetic signatures.
+   * Broadcasts one prepared transfer. A later call re-reads the original signature
+   * and does not construct or send another payment.
+   * Signature confirmation is not SETTLEMENT_CONFIRMED until balances are observed.
    */
   async submitSettlementTransaction(
     prepared: PreparedSettlement,
     payer: Keypair
   ): Promise<{ success: boolean; signature?: string; slot?: number; error?: string }> {
+    if (prepared.signature || prepared.status === 'SETTLEMENT_OUTCOME_UNKNOWN' || prepared.status === 'SETTLEMENT_SUBMITTED' || prepared.status === 'SETTLEMENT_CONFIRMATION_PENDING') {
+      return this.reconcilePrepared(prepared);
+    }
+    const delegateeKey = prepared.transaction.instructions[0]?.keys.find(
+      (key) => key.pubkey.equals(payer.publicKey) && key.isSigner
+    );
+    if (!delegateeKey) {
+      prepared.status = 'SETTLEMENT_FAILED';
+      return { success: false, error: 'The fee payer is not the delegatee required by transfer_fixed.' };
+    }
+
+    let broadcastStarted = false;
     try {
-      const { blockhash, lastValidBlockHeight } =
-        await this.connection.getLatestBlockhash('confirmed');
+      const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
       prepared.transaction.recentBlockhash = blockhash;
       prepared.transaction.feePayer = payer.publicKey;
       prepared.transaction.sign(payer);
-
-      const rawTx = prepared.transaction.serialize();
-      const signature = await this.connection.sendRawTransaction(rawTx, {
+      broadcastStarted = true;
+      const signature = await this.connection.sendRawTransaction(prepared.transaction.serialize(), {
         skipPreflight: false,
         preflightCommitment: 'confirmed',
       });
-
       prepared.signature = signature;
-      prepared.status = 'SETTLEMENT_PENDING';
-
-      // Await confirmation from RPC
+      prepared.status = 'SETTLEMENT_SUBMITTED';
       const confirmation = await this.connection.confirmTransaction(
-        {
-          signature,
-          blockhash,
-          lastValidBlockHeight,
-        },
+        { signature, blockhash, lastValidBlockHeight },
         'confirmed'
       );
-
       if (confirmation.value.err) {
         prepared.status = 'SETTLEMENT_FAILED';
-        return {
-          success: false,
-          signature,
-          error: `Transaction failed during RPC confirmation: ${JSON.stringify(confirmation.value.err)}`,
-        };
+        return { success: false, signature, error: `On-chain execution failed: ${JSON.stringify(confirmation.value.err)}` };
       }
-
-      prepared.status = 'SETTLEMENT_CONFIRMED';
-      prepared.explorerUrl = `https://explorer.solana.com/tx/${signature}?cluster=${prepared.cluster}`;
-
-      return {
-        success: true,
-        signature,
-        slot: confirmation.context.slot,
-      };
+      prepared.status = 'SETTLEMENT_CONFIRMATION_PENDING';
+      prepared.explorerUrl = explorerUrl(prepared.cluster, signature);
+      return { success: false, signature, slot: confirmation.context.slot, error: 'Signature landed. Token balances have not been observed.' };
     } catch (err: any) {
-      prepared.status = 'SETTLEMENT_FAILED';
-      return {
-        success: false,
-        error: err?.message || 'Solana RPC transaction submission error',
-      };
+      prepared.status = broadcastStarted ? 'SETTLEMENT_OUTCOME_UNKNOWN' : 'SETTLEMENT_FAILED';
+      return { success: false, signature: prepared.signature, error: err?.message || 'Solana RPC transaction submission error' };
     }
   }
 
-  /**
-   * Simulates transaction execution against the Solana RPC node.
-   * Validates account metas, signatures, and instruction compilation without swallowing errors.
-   */
+  async reconcilePrepared(
+    prepared: PreparedSettlement
+  ): Promise<{ success: boolean; signature?: string; slot?: number; error?: string }> {
+    if (!prepared.signature) {
+      prepared.status = 'SETTLEMENT_OUTCOME_UNKNOWN';
+      return { success: false, error: 'Broadcast outcome is unknown and no signature was persisted.' };
+    }
+    try {
+      const status = await this.connection.getSignatureStatuses([prepared.signature]);
+      const value = status.value[0];
+      if (!value) {
+        prepared.status = 'SETTLEMENT_OUTCOME_UNKNOWN';
+        return { success: false, signature: prepared.signature, error: 'Signature is not visible on the cluster yet.' };
+      }
+      if (value.err) {
+        prepared.status = 'SETTLEMENT_FAILED';
+        return { success: false, signature: prepared.signature, error: `On-chain execution failed: ${JSON.stringify(value.err)}` };
+      }
+      prepared.finality = value.confirmationStatus === 'finalized' ? 'finalized' : 'confirmed';
+      prepared.status = 'SETTLEMENT_CONFIRMATION_PENDING';
+      return { success: false, signature: prepared.signature, slot: value.slot, error: 'Token balances have not been observed.' };
+    } catch (err: any) {
+      prepared.status = 'SETTLEMENT_OUTCOME_UNKNOWN';
+      return { success: false, signature: prepared.signature, error: err?.message || 'RPC status query failed' };
+    }
+  }
+
+  observeBalances(
+    prepared: PreparedSettlement,
+    balances: { sourceBefore: bigint; sourceAfter: bigint; destinationBefore: bigint; destinationAfter: bigint }
+  ): void {
+    const sourceDelta = balances.sourceBefore - balances.sourceAfter;
+    const destinationDelta = balances.destinationAfter - balances.destinationBefore;
+    if (sourceDelta !== prepared.amountMicroUsdc || destinationDelta !== prepared.amountMicroUsdc) {
+      throw new Error('Observed token balances do not match the authorized amount.');
+    }
+    if (prepared.status !== 'SETTLEMENT_CONFIRMATION_PENDING') {
+      throw new Error('Balances can be applied only after the signature is visible on-chain.');
+    }
+    prepared.status = prepared.finality === 'finalized' ? 'SETTLEMENT_FINALIZED' : 'SETTLEMENT_CONFIRMED';
+  }
+
   async simulateSettlement(
     prepared: PreparedSettlement
   ): Promise<{ success: boolean; logs?: string[]; error?: string }> {
     try {
       const { blockhash } = await this.connection.getLatestBlockhash('confirmed');
       prepared.transaction.recentBlockhash = blockhash;
-
       const sim = await this.connection.simulateTransaction(prepared.transaction);
-
       if (sim.value.err) {
-        return {
-          success: false,
-          logs: sim.value.logs ?? [],
-          error: JSON.stringify(sim.value.err),
-        };
+        return { success: false, logs: sim.value.logs ?? [], error: JSON.stringify(sim.value.err) };
       }
-
-      return {
-        success: true,
-        logs: sim.value.logs ?? [
-          `Program ${this.programId.toBase58()} instruction verified`,
-          `SPL Token TransferChecked verified for ${prepared.amountMicroUsdc} micro-USDC`,
-        ],
-      };
+      return { success: true, logs: sim.value.logs ?? [] };
     } catch (err: any) {
-      return {
-        success: false,
-        error: err?.message || 'RPC simulation error',
-      };
+      return { success: false, error: err?.message || 'RPC simulation error' };
     }
   }
+}
+
+function formatMicroUsdc(amount: bigint): string {
+  const whole = amount / 1_000_000n;
+  const fraction = (amount % 1_000_000n).toString().padStart(6, '0');
+  return `${whole}.${fraction}`;
+}
+
+function addressSigner(pubkey: PublicKey) {
+  return {
+    address: pubkey.toBase58(),
+    signTransactions: async () => {
+      throw new Error('transfer_fixed is signed by the delegatee keypair, not by the instruction builder.');
+    },
+  } as any;
+}
+
+function toWeb3Instruction(programId: PublicKey, instruction: { programAddress: string; accounts: ReadonlyArray<{ address: string; role: number }>; data: Uint8Array | Readonly<Uint8Array> }): TransactionInstruction {
+  if (instruction.programAddress !== programId.toBase58()) {
+    throw new Error('Subscriptions instruction was built for an unexpected program.');
+  }
+  return new TransactionInstruction({
+    programId,
+    keys: instruction.accounts.map((account) => ({
+      pubkey: new PublicKey(account.address),
+      isSigner: (account.role & 2) === 2,
+      isWritable: (account.role & 1) === 1,
+    })),
+    data: Buffer.from(instruction.data),
+  });
+}
+
+function explorerUrl(cluster: PreparedSettlement['cluster'], signature: string): string {
+  if (cluster === 'localnet') return `http://127.0.0.1:8899/tx/${signature}`;
+  const query = cluster === 'mainnet-beta' ? '' : `?cluster=${cluster}`;
+  return `https://explorer.solana.com/tx/${signature}${query}`;
 }

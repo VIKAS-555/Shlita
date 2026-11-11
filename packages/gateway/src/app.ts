@@ -668,6 +668,42 @@ export function createGatewayApp(
     return c.json({ success: true, agentId: gate.agentId, status: 'ACTIVE' });
   });
 
+  app.post('/v1/operations/:operationId/settle', async (c) => {
+    const operator = resolveOperator(c.req, operators);
+    if (!operator.ok) {
+      return c.json(
+        operator.status === 401
+          ? { error: 'UNAUTHORIZED', message: 'Authentication required.' }
+          : { error: 'FORBIDDEN', message: 'Forbidden.' },
+        operator.status
+      );
+    }
+    if (security.settlementEnabled !== true || !security.settlementDestination) {
+      return c.json({ error: 'SETTLEMENT_DISABLED', message: 'Settlement is disabled.', fundsMoved: false }, 403);
+    }
+    const body = await readJsonObject(c.req.raw, maxJsonBytes);
+    if (!body.ok) return c.json(body.body, body.status);
+    const destination = typeof body.value.destination === 'string' ? body.value.destination : '';
+    if (destination !== security.settlementDestination) {
+      return c.json({ error: 'DESTINATION_NOT_AUTHORIZED', message: 'Destination is not an authorized counterparty.', fundsMoved: false }, 403);
+    }
+    const parsed = parseMicroUsdc(body.value.amountMicroUsdc);
+    if (!parsed.ok) return c.json({ error: 'AMOUNT_REJECTED', message: parsed.message, fundsMoved: false }, 400);
+    const claim = engine.claimChainSettlement({
+      operationId: c.req.param('operationId'),
+      ownerOrg: operator.ownerOrg,
+      destination,
+      amountMicroUsdc: parsed.amount,
+      mint: settlementManager?.getUsdcMint().toBase58() ?? 'unconfigured',
+      cluster: settlementManager?.getCluster() ?? 'localnet',
+    });
+    if (!claim.ok) return c.json({ error: claim.error, message: claim.message, fundsMoved: false }, claim.httpStatus as 404 | 409 | 503);
+    if (claim.replay || !settlementManager) {
+      return c.json({ ...claim.settlement, replay: claim.replay, fundsMoved: claim.settlement.fundsMoved === true });
+    }
+    return c.json({ ...claim.settlement, replay: false, fundsMoved: false, broadcast: false });
+  });
+
   app.get('/v1/reconciliation', (c) => {
     const operator = resolveOperator(c.req, operators);
     if (!operator.ok) {
