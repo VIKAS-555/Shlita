@@ -13,7 +13,9 @@ permissions:
   id-token: write
 
 concurrency:
-  group: 'pages'
+  # A run that never receives jobs stays "queued" forever and cannot be
+  # cancelled. One shared group would pin every later run behind it.
+  group: pages-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
