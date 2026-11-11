@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { PublicKey } from '@solana/web3.js';
 import { createPolicyEngine, PolicyEngine, SpendingPolicy } from '../../core/src/index.js';
 import { SolanaSettlementManager } from '../../solana/src/settlement.js';
 import { createGatewayApp } from './app.js';
@@ -60,10 +61,20 @@ export function bootFromEnv(env: Record<string, string | undefined>): BootSucces
   if (env.SOLANA_NETWORK === 'mainnet-beta' && !allowMainnet) {
     return { ok: false, errors: ['Mainnet settlement is disabled.'] };
   }
+  let settlementMint: PublicKey | undefined;
+  if (env.SHLITA_SETTLEMENT_MINT) {
+    try {
+      settlementMint = new PublicKey(env.SHLITA_SETTLEMENT_MINT);
+    } catch {
+      return { ok: false, errors: ['SHLITA_SETTLEMENT_MINT is not a Solana address.'] };
+    }
+  }
   const settlementManager = new SolanaSettlementManager(
     env.SOLANA_RPC_URL || 'http://127.0.0.1:8899',
     undefined,
-    allowMainnet
+    allowMainnet,
+    undefined,
+    settlementMint
   );
 
   const app = createGatewayApp(engine, settlementManager, {

@@ -62,7 +62,8 @@ export class SolanaSettlementManager {
     rpcUrl = 'http://127.0.0.1:8899',
     payerKeypair?: Keypair,
     isMainnet = false,
-    connection?: Connection
+    connection?: Connection,
+    mint?: PublicKey
   ) {
     if (isMainnet && process.env.SHLITA_ALLOW_MAINNET !== 'true') {
       throw new Error('Mainnet settlement is disabled.');
@@ -70,7 +71,7 @@ export class SolanaSettlementManager {
     this.connection = connection ?? new Connection(rpcUrl, 'confirmed');
     this.operatorKeypair = payerKeypair;
     this.isMainnet = isMainnet;
-    this.usdcMint = isMainnet ? USDC_MINT_MAINNET : USDC_MINT_DEVNET;
+    this.usdcMint = mint ?? (isMainnet ? USDC_MINT_MAINNET : USDC_MINT_DEVNET);
     this.programId = SUBSCRIPTIONS_PROGRAM_ID;
   }
 
