@@ -37,6 +37,9 @@ jobs:
       - name: Run automated test matrix
         run: npm test
 
+      - name: Install the SDK archive outside the repository
+        run: node scripts/sdk-consumer-check.mjs
+
       - name: Record whether funded Solana execution ran
         run: |
           set +e

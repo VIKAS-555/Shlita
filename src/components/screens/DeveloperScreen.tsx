@@ -33,61 +33,40 @@ export const DeveloperScreen: React.FC<DeveloperScreenProps> = ({ agents = [], o
   const apiKey = 'shlt_example_not_a_secret';
 
   const snippets = {
-    curl: `curl -X POST https://api.shlita.finance/v1/proxy \\
-  -H "Authorization: Bearer ${apiKey}" \\
+    curl: `curl -X POST "$SHLITA_GATEWAY_URL/v1/proxy" \\
+  -H "x-shlita-api-key: $SHLITA_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "agentId": "agent-researcher-01",
     "vendor": "api.helius.xyz",
-    "estimatedCostMicroUsdc": "20000",
-    "path": "/v0/addresses/USDC/balances"
+    "path": "/v0/token-metadata",
+    "idempotencyKey": "operation-unique-id",
+    "simulate": true
   }'`,
-    nodejs: `import { ShlitaClient } from '@shlita/sdk';
+    nodejs: `import { ShlitaAgentClient } from 'shlita-sdk';
 
-const client = new ShlitaClient({
+const shlita = new ShlitaAgentClient({
   apiKey: process.env.SHLITA_API_KEY,
-  network: 'mainnet-beta',
+  baseUrl: process.env.SHLITA_GATEWAY_URL,
 });
 
-// Outbound paid API call via Shlita policy perimeter
-const response = await client.proxy({
+const result = await shlita.proxy({
   agentId: 'agent-researcher-01',
   vendor: 'api.helius.xyz',
-  estimatedCostMicroUsdc: 20000n, // $0.02 USDC
   method: 'POST',
   path: '/v0/token-metadata',
-  body: { mints: ['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'] },
+  body: { mints: ['example-mint'] },
+  idempotencyKey: 'operation-unique-id',
 });
 
-console.log('Approved & Settled:', response.data);`,
-    python: `from shlita import ShlitaClient
-
-client = ShlitaClient(
-    api_key="shlt_live_...",
-    network="mainnet-beta"
-)
-
-# Intercept and evaluate spending before network dispatch
-res = client.proxy(
-    agent_id="agent-researcher-01",
-    vendor="api.tavily.com",
-    estimated_cost_micro_usdc=15000,
-    path="/search",
-    json={"query": "Solana Subscriptions 2026"}
-)
-
-print(f"Settled: {res.is_allowed}, Spend: {res.current_spend_usdc}")`,
-    solana: `import { PublicKey, Transaction } from '@solana/web3.js';
-import { deriveSubscriptionAuthorityPda } from '@shlita/solana';
-
-// Derive deterministic Subscriptions Authority PDA
-const [authorityPda, bump] = deriveSubscriptionAuthorityPda(
-  agentWallet.publicKey,
-  merchantWallet.publicKey,
-  PROGRAM_ID
-);
-
-console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
+console.log(result.outcome);`,
+    python: `# A Python package is not part of this repository.
+# Use the Node.js package shlita-sdk, installed from the local archive.
+# Do not send an agent key from a browser.`,
+    solana: `// Chain settlement is an operator action on the gateway.
+// The agent SDK does not hold a payer key, and mainnet is off unless
+// the gateway is explicitly configured for it.
+// A committed proxy response has fundsMoved: false until a confirmed settlement exists.`,
   };
 
   const copyToClipboard = (text: string, isKey = false) => {
@@ -277,7 +256,7 @@ console.log('Solana Subscriptions Authority PDA:', authorityPda.toBase58());`,
           </div>
 
           <p className="text-[11px] text-text-muted mt-4 font-mono">
-            Requires Node.js 18+ or Python 3.9+. Supports TypeScript native ESM types.
+            Node.js 22 or newer. Install the local shlita-sdk archive. There is no Python package.
           </p>
         </div>
 

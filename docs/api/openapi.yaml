@@ -1,0 +1,407 @@
+openapi: 3.0.3
+info:
+  title: Shlita gateway API
+  version: "0.1.0"
+  description: |
+    HTTP contract for the single-instance Shlita gateway.
+    Amounts are integer micro-USDC strings. 10000 micro-USDC is 0.010000 USDC.
+    A successful proxy reserves the server tariff as an estimate. actualCostMicroUsdc stays null,
+    settlement stays NOT_SUBMITTED, and fundsMoved is false until a chain settlement is confirmed.
+    This document does not describe a public hosted gateway. Call the gateway you run.
+servers:
+  - url: http://127.0.0.1:4000
+    description: Local gateway. Replace the host with the gateway you operate.
+tags:
+  - name: public
+  - name: session
+  - name: agent
+  - name: operator
+paths:
+  /health:
+    get:
+      tags: [public]
+      summary: Process is running
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: The process is up. The body does not include credentials.
+  /ready:
+    get:
+      tags: [public]
+      summary: Gateway can accept work
+      operationId: ready
+      security: []
+      responses:
+        "200":
+          description: Storage is ready and the process is accepting work.
+        "503":
+          description: Storage is unavailable or the process is shutting down.
+  /metrics:
+    get:
+      tags: [public]
+      summary: Operational counters
+      operationId: metrics
+      security: []
+      responses:
+        "200":
+          description: Plain-text counters. No credentials and no account identifiers beyond aggregate counts.
+  /v1/session:
+    post:
+      tags: [session]
+      summary: Open an operator session
+      operationId: createSession
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operatorKey]
+              properties:
+                operatorKey:
+                  type: string
+                  description: Operator credential. It is not returned in the response.
+      responses:
+        "200":
+          description: Sets an HttpOnly session cookie and returns a CSRF token.
+        "401":
+          description: Missing credential.
+        "403":
+          description: Unknown operator credential.
+        "429":
+          description: Too many sign-in attempts for this client.
+    get:
+      tags: [session]
+      summary: Read the current operator session
+      operationId: readSession
+      security:
+        - sessionCookie: []
+        - operatorKey: []
+      responses:
+        "200":
+          description: The session is authenticated.
+        "401":
+          description: No operator session or operator key.
+  /v1/session/logout:
+    post:
+      tags: [session]
+      summary: Revoke the current session cookie
+      operationId: logout
+      responses:
+        "200":
+          description: The cookie is cleared.
+        "403":
+          description: A cookie session was presented without its CSRF token.
+  /v1/proxy:
+    post:
+      tags: [agent]
+      summary: Authorize and dispatch one billable provider call
+      operationId: proxy
+      security:
+        - agentKey: []
+      parameters:
+        - $ref: "#/components/parameters/requestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProxyRequest"
+      responses:
+        "200":
+          description: |
+            The server tariff was reserved and the provider result was stored.
+            A repeated call with the same idempotency key and fingerprint returns this stored result
+            and sets x-shlita-idempotent-replay: true. The upstream provider is not called again.
+        "400":
+          description: The idempotency key or amount was rejected.
+        "401":
+          description: The agent credential is missing.
+        "403":
+          description: Policy, identity, or simulation rejection. The reservation is not a committed charge.
+        "409":
+          description: IDEMPOTENCY_CONFLICT or OPERATION_IN_PROGRESS. The caller must not change the key and retry a different payload.
+        "504":
+          description: |
+            The provider outcome is unknown. The reservation stays held and the state becomes RECONCILIATION_REQUIRED.
+            This is not a definite provider failure and must not be retried with a new idempotency key.
+  /v1/agents:
+    get:
+      tags: [operator]
+      summary: List agents in the operator organization
+      operationId: listAgents
+      security:
+        - operatorKey: []
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Enrolled agents. Raw API keys are not included.
+        "401":
+          description: Operator authentication is required.
+    post:
+      tags: [operator]
+      summary: Enroll an agent and issue one API key
+      operationId: enrollAgent
+      security:
+        - operatorKey: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnrollAgent"
+      responses:
+        "201":
+          description: The API key is returned once.
+        "400":
+          description: The agent id, vendor list, or micro-USDC amount was rejected.
+        "401":
+          description: Operator authentication is required.
+        "403":
+          description: CSRF or origin rejection for a cookie session.
+        "409":
+          description: An agent with that id already exists.
+        "429":
+          description: Too many operator mutations.
+  /v1/agents/{id}/freeze:
+    post:
+      tags: [operator]
+      summary: Freeze one agent in the operator organization
+      operationId: freezeAgent
+      security:
+        - operatorKey: []
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: The agent status is AGENT_FROZEN.
+        "401":
+          description: Operator authentication is required.
+        "403":
+          description: The agent is outside this organization, or the cookie session failed CSRF or origin checks.
+  /v1/agents/{id}/unfreeze:
+    post:
+      tags: [operator]
+      summary: Unfreeze one agent
+      operationId: unfreezeAgent
+      security:
+        - operatorKey: []
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: The agent status is ACTIVE.
+        "401":
+          description: Operator authentication is required.
+        "403":
+          description: The agent is outside this organization.
+  /v1/agents/{id}/reset-circuit:
+    post:
+      tags: [operator]
+      summary: Reset an agent circuit breaker
+      operationId: resetCircuit
+      security:
+        - operatorKey: []
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: The circuit breaker counters are cleared.
+        "401":
+          description: Operator authentication is required.
+        "403":
+          description: The agent is outside this organization.
+  /v1/operations:
+    get:
+      tags: [operator]
+      summary: List ledger operations for the operator organization
+      operationId: listOperations
+      security:
+        - operatorKey: []
+        - sessionCookie: []
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: Operations newest first. Amounts are micro-USDC strings. signature is null until a chain settlement stores one.
+        "401":
+          description: Operator authentication is required.
+  /v1/operations/{operationId}/settle:
+    post:
+      tags: [operator]
+      summary: Record a settlement claim without broadcasting a transaction
+      operationId: claimSettlement
+      description: |
+        The gateway claims a chain settlement row for an authorized destination.
+        It does not broadcast a Solana transaction and does not move funds by itself.
+      security:
+        - operatorKey: []
+        - sessionCookie: []
+      parameters:
+        - in: path
+          name: operationId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [destination, amountMicroUsdc]
+              properties:
+                destination: { type: string }
+                amountMicroUsdc: { type: string }
+      responses:
+        "200":
+          description: A claim was stored or replayed. fundsMoved is false unless the stored status is confirmed or finalized.
+        "401":
+          description: Operator authentication is required.
+        "403":
+          description: Settlement is disabled or the destination is not authorized.
+        "404":
+          description: The operation is not in this organization.
+  /v1/dashboard:
+    get:
+      tags: [operator]
+      summary: Organization ledger summary
+      operationId: dashboard
+      security:
+        - operatorKey: []
+        - sessionCookie: []
+      responses:
+        "200":
+          description: source is ledger. accountedSpendMicroUsdc is a decimal string of micro-USDC.
+        "401":
+          description: Operator authentication is required.
+  /v1/audit:
+    get:
+      tags: [operator]
+      summary: Audit events for the operator organization
+      operationId: audit
+      security:
+        - operatorKey: []
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Organization-scoped audit events.
+        "401":
+          description: Operator authentication is required.
+  /v1/reconciliation:
+    get:
+      tags: [operator]
+      summary: Operations that still need an operator decision
+      operationId: reconciliation
+      security:
+        - operatorKey: []
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Unresolved operations. They are not safe to dispatch again automatically.
+        "401":
+          description: Operator authentication is required.
+  /v1/telemetry:
+    get:
+      tags: [operator]
+      summary: Recent organization telemetry
+      operationId: telemetry
+      security:
+        - operatorKey: []
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Recent events for this organization.
+        "401":
+          description: Operator authentication is required.
+components:
+  securitySchemes:
+    agentKey:
+      type: apiKey
+      in: header
+      name: x-shlita-api-key
+      description: Agent credential. It cannot call operator routes.
+    operatorKey:
+      type: apiKey
+      in: header
+      name: x-shlita-operator-key
+      description: Operator credential for a trusted backend. Cookie sessions are the dashboard path.
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: shlita_session
+      description: HttpOnly operator session. Mutations also require the x-shlita-csrf header.
+  parameters:
+    agentId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string }
+    requestId:
+      in: header
+      name: x-request-id
+      required: false
+      schema: { type: string }
+      description: Optional caller correlation id. The gateway returns x-shlita-correlation-id.
+  schemas:
+    ProxyRequest:
+      type: object
+      required: [agentId, vendor, idempotencyKey]
+      properties:
+        agentId: { type: string }
+        vendor: { type: string, description: Approved provider host. URLs that target loopback or link-local addresses are rejected. }
+        path: { type: string, default: / }
+        method: { type: string, enum: [GET, POST, PUT, PATCH, DELETE] }
+        body: {}
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
+          description: Required for every billable call. Retries must reuse this exact key and the same request fingerprint.
+        estimatedCostMicroUsdc:
+          type: string
+          description: Optional caller declaration. The reserved amount is the server tariff, not this value.
+        simulate:
+          type: boolean
+          description: Accepted only when the gateway is explicitly configured with SHLITA_ALLOW_SIMULATION=true. Production rejects it.
+    EnrollAgent:
+      type: object
+      required: [agentId, allowedVendors, maxPerCallMicroUsdc, periodBudgetMicroUsdc]
+      properties:
+        agentId: { type: string }
+        allowedVendors:
+          type: array
+          items: { type: string }
+        maxPerCallMicroUsdc: { type: string }
+        periodBudgetMicroUsdc: { type: string }

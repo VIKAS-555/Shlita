@@ -269,6 +269,28 @@ describe('Shlita Gateway HTTP Seam', () => {
       expect(response.status).toBe(200);
       expect(response.decision).toBe('ALLOWED');
       expect(response.data.success).toBe(true);
+
+      const seen: Record<string, string>[] = [];
+      const original = globalThis.fetch;
+      globalThis.fetch = (async (input, init) => {
+        seen.push(Object.fromEntries(new Headers(init?.headers).entries()));
+        return original(input, init);
+      }) as typeof fetch;
+      try {
+        await client.proxy({
+          agentId: 'agent-sentinel-01',
+          vendor: 'api.helius.xyz',
+          path: '/v0/token-metadata',
+          body: { mints: ['header-check'] },
+          idempotencyKey: 'gateway-sdk-header-01',
+          simulate: true,
+          headers: { 'x-shlita-api-key': 'attacker-key-should-not-win', authorization: 'Bearer stolen' },
+        });
+      } finally {
+        globalThis.fetch = original;
+      }
+      expect(seen[0]?.['x-shlita-api-key']).toBe(AGENT_KEY);
+      expect(seen[0]?.authorization).toBeUndefined();
     } finally {
       server.close();
     }
