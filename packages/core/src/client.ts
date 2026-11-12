@@ -46,12 +46,25 @@ export class ShlitaClient {
     if (!params.idempotencyKey) {
       throw new Error('ShlitaClient.proxy requires an idempotencyKey.');
     }
+    const callerHeaders = { ...(params.headers || {}) };
+    for (const name of Object.keys(callerHeaders)) {
+      const normalized = name.toLowerCase();
+      if (
+        normalized === 'authorization' ||
+        normalized === 'cookie' ||
+        normalized === 'x-shlita-api-key' ||
+        normalized === 'x-shlita-operator-key' ||
+        normalized === 'x-shlita-csrf'
+      ) {
+        delete callerHeaders[name];
+      }
+    }
     const res = await fetch(`${this.baseUrl}/v1/proxy`, {
       method: 'POST',
       headers: {
+        ...callerHeaders,
         'Content-Type': 'application/json',
         'x-shlita-api-key': this.apiKey,
-        ...(params.headers || {}),
       },
       body: JSON.stringify({
         agentId: params.agentId,

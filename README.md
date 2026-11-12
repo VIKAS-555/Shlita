@@ -8,7 +8,7 @@
 [![GitHub Pages](https://img.shields.io/badge/Mirror-xiaoarnav.github.io%2FShlita-14F195?style=flat-square&logo=googlechrome&logoColor=white)](https://xiaoarnav.github.io/Shlita/)
 [![YouTube Demo](https://img.shields.io/badge/YouTube-Video%20Demo-FF0000?style=flat-square&logo=youtube&logoColor=white)](https://youtu.be/o5vHfcUjDJE)
 [![Solana Subscriptions](https://img.shields.io/badge/Solana-Subscriptions%20PDA-7C3AED?style=flat-square&logo=solana)](https://solana.com)
-[![Tests](https://img.shields.io/badge/Tests-25%20Passing-success?style=flat-square)](tests)
+[![Tests](https://img.shields.io/badge/Tests-npm%20test-success?style=flat-square)](https://github.com/XiaoArnav/Shlita/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
 - ⚡ **Static demo (Vercel)**: [https://shlita.vercel.app/](https://shlita.vercel.app/) serves the built interface only. It does not host the ledger.
@@ -104,16 +104,16 @@ Shlita enforces strict truth-in-advertising for all transaction states:
 ```
 shlita/
 ├── packages/
-│   ├── core/                  # Deterministic Policy Engine, ShlitaClient SDK & Durable SQLite Ledger
+│   ├── core/                  # Policy engine and durable SQLite ledger
 │   ├── gateway/               # Hono HTTP API Gateway (/v1/proxy, /v1/agents, audit logs, SSRF guard)
+│   ├── sdk/                   # Installable agent and operator clients (shlita-sdk)
 │   └── solana/                # Canonical Solana Subscriptions Protocol (Program De1egAF...vR44)
 ├── src/                       # React 18 + Vite + Tailwind v4 + Recharts UI Dashboard
 ├── demo/
 │   └── run-demo.ts            # Terminal attack & circuit breaker simulation
-├── tests/                     # 25 Unit & Integration Tests (Vitest)
-│   ├── core.test.ts           # 12 Core ledger, concurrency, and policy invariant tests
-│   ├── gateway.test.ts        # 8 Gateway, SSRF firewall, SDK and authentication tests
-│   └── solana.test.ts         # 5 Canonical Solana Subscriptions protocol and honest state tests
+├── tests/                     # Vitest suite, including the external SDK install
+├── examples/                  # Runnable agent, policy, idempotency, and tool examples
+├── docs/api/openapi.yaml      # HTTP contract for the routes the gateway implements
 ├── GLOSSARY.md                # Ubiquitous domain language
 └── docs/adr/                  # Architectural Decision Records (ADR 0001)
 ```
@@ -137,7 +137,7 @@ npm install
 ```bash
 npm test
 ```
-All **25 unit and integration tests** execute against core invariants, atomic budget reservations, gateway SSRF proxies, client SDK, and canonical Solana Subscriptions settlement seams.
+`npm test` runs the ledger, gateway, session, Solana, and SDK suites. One test packs `shlita-sdk` and installs that archive in a temporary project outside this repository.
 
 ### Run Attack Simulation
 ```bash
@@ -160,37 +160,47 @@ Development startup without `SHLITA_OPERATOR_KEY` generates a local operator key
 
 ## 6. Integration Example (Agent SDK)
 
-### Node.js / TypeScript
-```typescript
-import { ShlitaClient } from 'shlita';
+The installable package is `packages/sdk`, named `shlita-sdk`. It is not published to npm. Build an archive and install that archive:
 
-const client = new ShlitaClient({
-  apiKey: process.env.SHLITA_API_KEY,
-  baseUrl: 'http://localhost:4000',
+```bash
+npm run build:sdk
+cd packages/sdk && npm pack --pack-destination /tmp/shlita-sdk
+npm install /tmp/shlita-sdk/shlita-sdk-0.1.0.tgz
+```
+
+The client requires Node.js 22 or newer. Pass the gateway URL explicitly. Keep the agent key in a trusted process, and use `ShlitaOperatorClient` only on a trusted backend. The full setup, including policies, timeouts, and settlement, is in [docs/sdk/quickstart.md](docs/sdk/quickstart.md). The HTTP contract is [docs/api/openapi.yaml](docs/api/openapi.yaml).
+
+```typescript
+import { ShlitaAgentClient } from 'shlita-sdk';
+
+const shlita = new ShlitaAgentClient({
+  apiKey: process.env.SHLITA_API_KEY!,
+  baseUrl: process.env.SHLITA_GATEWAY_URL!,
 });
 
-// Outbound paid tool invocation protected by Shlita perimeter
-const response = await client.proxy({
-  agentId: 'agent-sentinel-01',
+const result = await shlita.proxy({
+  agentId: 'research-agent',
   vendor: 'api.helius.xyz',
   method: 'POST',
-  path: '/v0/addresses/USDC/balances',
-  body: { address: '...' },
+  path: '/v0/token-metadata',
+  body: { mints: ['example-mint'] },
+  idempotencyKey: 'operation-unique-id',
 });
-
-console.log('Policy Approved & Forwarded:', response.data);
 ```
+
+Runnable copies live in `examples/`. They talk to a local gateway and send `simulate: true`, so they do not call a paid provider.
 
 ### cURL
 ```bash
-curl -X POST http://localhost:4000/v1/proxy \
+curl -X POST "$SHLITA_GATEWAY_URL/v1/proxy" \
   -H "x-shlita-api-key: $SHLITA_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "agentId": "agent-sentinel-01",
+    "agentId": "research-agent",
     "vendor": "api.helius.xyz",
-    "path": "/v0/addresses/USDC/balances",
-    "body": { "address": "..." }
+    "path": "/v0/token-metadata",
+    "idempotencyKey": "operation-unique-id",
+    "simulate": true
   }'
 ```
 
