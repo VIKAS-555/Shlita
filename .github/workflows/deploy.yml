@@ -92,7 +92,15 @@ jobs:
             -v shlita-step5:/var/lib/shlita \
             shlita:step5
           ready() {
-            curl -sf http://127.0.0.1:4010/ready
+            curl -sf -o /dev/null http://127.0.0.1:4010/ready
+          }
+          sign_in() {
+            code="$(curl -sS -D /tmp/shlita-session.headers -o /tmp/shlita-session.json -w '%{http_code}' \
+              -H 'content-type: application/json' \
+              -d "{\"operatorKey\":\"$KEY\"}" \
+              http://127.0.0.1:4010/v1/session)"
+            test "$code" = 200
+            python3 -c 'import json; print(json.load(open("/tmp/shlita-session.json"))["csrfToken"])'
           }
           for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
             if ready; then break; fi
@@ -100,10 +108,7 @@ jobs:
           done
           ready || { docker logs shlita-step5; exit 1; }
           curl -sf -o /tmp/shlita-agents.json -w '%{http_code}' http://127.0.0.1:4010/v1/agents | grep -qx 401
-          CSRF="$(curl -sf -D /tmp/shlita-session.headers -o /tmp/shlita-session.json \
-            -H 'content-type: application/json' \
-            -d "{\"operatorKey\":\"$KEY\"}" \
-            http://127.0.0.1:4010/v1/session | python3 -c 'import json,sys; print(json.load(sys.stdin)["csrfToken"])')"
+          CSRF="$(sign_in)"
           COOKIE="$(awk 'BEGIN{IGNORECASE=1} /^set-cookie:/ {print $2}' /tmp/shlita-session.headers | cut -d';' -f1)"
           test -n "$COOKIE"
           grep -q HttpOnly /tmp/shlita-session.headers
@@ -138,10 +143,7 @@ jobs:
             sleep 1
           done
           ready || { docker logs shlita-step5; exit 1; }
-          CSRF="$(curl -sf -D /tmp/shlita-session.headers -o /tmp/shlita-session.json \
-            -H 'content-type: application/json' \
-            -d "{\"operatorKey\":\"$KEY\"}" \
-            http://127.0.0.1:4010/v1/session | python3 -c 'import json,sys; print(json.load(sys.stdin)["csrfToken"])')"
+          CSRF="$(sign_in)"
           COOKIE="$(awk 'BEGIN{IGNORECASE=1} /^set-cookie:/ {print $2}' /tmp/shlita-session.headers | cut -d';' -f1)"
           curl -sf -H "cookie: $COOKIE" http://127.0.0.1:4010/v1/operations | python3 -c 'import json,sys; rows=json.load(sys.stdin)["operations"]; assert len(rows)==1; assert rows[0]["reservedAmountMicroUsdc"]=="10000"; assert rows[0]["signature"] is None'
           docker logs shlita-step5 | grep -q "$KEY" && exit 1 || true
