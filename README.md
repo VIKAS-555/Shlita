@@ -206,6 +206,32 @@ curl -X POST "$SHLITA_GATEWAY_URL/v1/proxy" \
 
 ---
 
-## 7. License
+## 7. Commercial Readiness, Security Audit & Pilot Blueprint (Steps 7–8)
+
+Shlita has undergone independent security auditing, commercial readiness analysis, and operational planning for staging deployment and controlled pilot onboarding:
+
+### Step 7 — Commercial Readiness & Security Validation Audit
+- [Readiness Audit (18 Capabilities)](docs/step-7/READINESS_AUDIT.md)
+- [Commercial Release Gates Evaluation](docs/step-7/RELEASE_GATES.md)
+- [Application Security Review & Threat Classifications](docs/step-7/SECURITY_FINDINGS.md)
+- [Controlled Pilot Architecture & Constraints](docs/step-7/PILOT_PLAN.md)
+- [Operations & Monitoring Checklist](docs/step-7/OPERATIONS_CHECKLIST.md)
+- [Commercial Assumptions vs Verified Realities](docs/step-7/COMMERCIAL_ASSUMPTIONS.md)
+- [Remaining Engineering Roadmap (Milestones A–D)](docs/step-7/REMAINING_WORK.md)
+
+### Step 8 — Pilot Deployment Blueprint & Release-Gate Closure
+- [Staging Deployment Blueprint & Ingress Topology](docs/step-8/DEPLOYMENT_BLUEPRINT.md)
+- [Step 7 Findings Closure & Gate Status](docs/step-8/STEP_7_CLOSURE.md)
+- [Pilot End-to-End Test Matrix](docs/step-8/PILOT_TEST_MATRIX.md)
+- [Pilot Operations & Guardrail Specifications](docs/step-8/PILOT_OPERATIONS.md)
+- [Site Reliability & Incident Response Runbook](docs/step-8/INCIDENT_RESPONSE.md)
+- [Developer Integration & Onboarding Guide](docs/step-8/DEVELOPER_ONBOARDING.md)
+- [Release Gate Scorecard (10 Passed, 2 Staging Blockers)](docs/step-8/RELEASE_GATES.md)
+- [Remaining Pilot Blockers & Acceptance Criteria](docs/step-8/REMAINING_BLOCKERS.md)
+- [Staging Implementation & Execution Roadmap](docs/step-8/NEXT_IMPLEMENTATION_PLAN.md)
+
+---
+
+## 8. License
 
 MIT © [XiaoArnav](https://github.com/XiaoArnav)
