@@ -33,11 +33,11 @@ flowchart LR
 - **Objective:** Establish the dedicated, single-tenant hosting environment specified in `docs/step-8/DEPLOYMENT_BLUEPRINT.md`.
 - **Target Deliverables:**
   1. Provision Linux VM (Ubuntu 24.04 LTS, 2 vCPU, 4GB RAM, NVMe storage).
-  2. Map DNS record: `staging-gateway.shlita.internal` (or public pilot domain).
+  2. Map public DNS record: `gateway.staging.shlita.xyz` (or registered public pilot domain; Let's Encrypt requires a public FQDN).
   3. Deploy Caddy reverse proxy with automated Let's Encrypt TLS termination.
   4. Configure persistent host directory `/var/lib/shlita/data` with non-root ownership (`UID:GID 10001:10001`).
 - **Verification Gate:**
-  `curl -I https://staging-gateway.shlita.internal/healthz` returns valid SSL handshake and upstream proxy header.
+  `curl -I https://gateway.staging.shlita.xyz/ready` returns valid SSL handshake and HTTP 200 JSON `{ "status": "ready" }`.
 
 ---
 

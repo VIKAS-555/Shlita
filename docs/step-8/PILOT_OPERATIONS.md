@@ -30,14 +30,14 @@ Every morning at 09:00 UTC, the on-call platform operator must execute the follo
 
 ### Step 1: Gateway Availability & Version Verification
 ```bash
-curl -s -i https://staging-gateway.shlita.internal/healthz
+curl -s -i https://gateway.staging.shlita.xyz/ready
 ```
 - **Invariant:** HTTP status must be `200 OK`.
 - **Expected Payload:**
   ```json
   {
-    "status": "healthy",
-    "version": "0.1.0",
+    "status": "ready"
+  }
     "uptimeSeconds": 86420,
     "database": "connected",
     "circuitBreaker": "CLOSED"

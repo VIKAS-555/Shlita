@@ -206,9 +206,9 @@ curl -X POST "$SHLITA_GATEWAY_URL/v1/proxy" \
 
 ---
 
-## 7. Commercial Readiness, Security Audit & Pilot Blueprint (Steps 7–8)
+## 7. Commercial Readiness, Staging Verification & Final Security Audit (Steps 7–10)
 
-Shlita has undergone independent security auditing, commercial readiness analysis, and operational planning for staging deployment and controlled pilot onboarding:
+Shlita has undergone independent security auditing, staging deployment verification, and comprehensive release-gate evaluation across Steps 7 through 10:
 
 ### Step 7 — Commercial Readiness & Security Validation Audit
 - [Readiness Audit (18 Capabilities)](docs/step-7/READINESS_AUDIT.md)
@@ -229,6 +229,29 @@ Shlita has undergone independent security auditing, commercial readiness analysi
 - [Release Gate Scorecard (10 Passed, 2 Staging Blockers)](docs/step-8/RELEASE_GATES.md)
 - [Remaining Pilot Blockers & Acceptance Criteria](docs/step-8/REMAINING_BLOCKERS.md)
 - [Staging Implementation & Execution Roadmap](docs/step-8/NEXT_IMPLEMENTATION_PLAN.md)
+
+### Step 9 — Staging Deployment Verification & Controlled Pilot Testing
+- [Staging Verification & Environment Setup](docs/step-9/STAGING_VERIFICATION.md)
+- [Security & Access Control Test Results](docs/step-9/SECURITY_TEST_RESULTS.md)
+- [Financial Control & 10-Way Concurrency Verification](docs/step-9/FINANCIAL_TEST_RESULTS.md)
+- [Dashboard & Telemetry Health Results](docs/step-9/DASHBOARD_TEST_RESULTS.md)
+- [SDK Independent Consumer Verification](docs/step-9/SDK_VERIFICATION.md)
+- [Persistence, WAL Recovery & Backup Integrity](docs/step-9/PERSISTENCE_RECOVERY.md)
+- [External Deployment Readiness Assessment](docs/step-9/DEPLOYMENT_READINESS.md)
+- [Controlled Pilot Operations Runbook](docs/step-9/PILOT_RUNBOOK.md)
+- [Remaining Staging Blockers Inventory](docs/step-9/REMAINING_BLOCKERS.md)
+
+### Step 10 — Final Security Audit, Production Readiness & Go/No-Go Decision
+- [Final Comprehensive Audit & Executive Synthesis](docs/step-10/FINAL_AUDIT.md)
+- [Security Verdict & Threat Assessment (STRIDE)](docs/step-10/SECURITY_VERDICT.md)
+- [Financial Integrity & Two-Phase Commit Ledger Audit](docs/step-10/FINANCIAL_VERIFICATION.md)
+- [Solana Subscriptions & On-Chain Safety Verification](docs/step-10/SOLANA_VERIFICATION.md)
+- [Infrastructure, Container & SRE Architecture Review](docs/step-10/INFRASTRUCTURE_REVIEW.md)
+- [Documentation Inconsistencies & Blueprint Conflict Audit](docs/step-10/DOCUMENTATION_CONFLICTS.md)
+- [Master Release Gate Matrix (19 Independent Gates)](docs/step-10/RELEASE_GATES.md)
+- [Production Readiness & Four-Tier Go/No-Go Decision](docs/step-10/PILOT_GO_NO_GO.md)
+- [Commercial Production Blockers & Non-Technical Requirements](docs/step-10/COMMERCIAL_LAUNCH_BLOCKERS.md)
+- [Prioritized Remediation Roadmap & Final Recommendations](docs/step-10/FINAL_RECOMMENDATIONS.md)
 
 ---
 

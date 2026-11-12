@@ -20,12 +20,12 @@ The following blockers currently prevent immediate open pilot rollout. Each bloc
 - **Architectural Impact:** External AI agent developers cannot connect their agents or SDK clients without manually pulling the Docker image and hosting the server themselves.
 - **Remediation Action Plan:**
   1. Provision single cloud VM instance (Ubuntu 24.04 LTS, 2 vCPU, 4GB RAM, 50GB NVMe).
-  2. Configure Caddy web server with automated Let's Encrypt TLS termination for `staging-gateway.shlita.internal` (or public subdomain).
+  2. Configure Caddy web server with automated Let's Encrypt TLS termination for a public FQDN (e.g. `gateway.staging.shlita.xyz`; public Let's Encrypt cannot issue for `.internal`).
   3. Deploy Shlita Gateway via Docker Compose with dedicated persistent volume mount for `/var/lib/shlita/data`.
 - **Acceptance Criteria:**
   ```bash
-  curl -s -I https://staging-gateway.shlita.internal/healthz
-  # MUST return HTTP/2 200 OK with valid TLS certificate chain.
+  curl -s -I https://gateway.staging.shlita.xyz/ready
+  # MUST return HTTP/2 200 OK with valid TLS certificate chain (polled on /ready).
   ```
 
 #### `BLOCKER-CRIT-02`: Single-Writer SQLite Concurrency Bottleneck
@@ -89,6 +89,6 @@ The following blockers currently prevent immediate open pilot rollout. Each bloc
 
 #### `BLOCKER-LOW-01`: Standalone SDK Quickstart Package Registry
 - **Severity:** **LOW**
-- **Root Cause:** The SDK is buildable and packages cleanly via `npm pack`, but is not published to public npm (e.g. `@shlita/sdk`).
-- **Remediation Action Plan:** Publish versioned tarball to GitHub Releases or register private npm package for pilot partners.
-- **Acceptance Criteria:** Partner can run `npm install @shlita/sdk` or install directly from release asset URL.
+- **Root Cause:** The package `shlita-sdk` is private and packages cleanly via `npm pack`, but is not published to public npm.
+- **Remediation Action Plan:** Publish versioned tarball `shlita-sdk-0.1.0.tgz` to GitHub Releases for pilot partners.
+- **Acceptance Criteria:** Partner can run `npm install ./shlita-sdk-0.1.0.tgz` or install directly from release asset URL.
