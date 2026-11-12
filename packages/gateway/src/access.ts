@@ -33,6 +33,9 @@ export interface GatewaySecurityOptions {
   /** Public treasury address allowed to receive settlement. Client-supplied addresses are rejected. */
   settlementDestination?: string;
   settlementEnabled?: boolean;
+  /** When true, the session cookie is marked Secure. Use this on HTTPS. */
+  secureCookies?: boolean;
+  sessions?: import('./session.js').OperatorSessionStore;
 }
 
 export interface AgentPrincipal {

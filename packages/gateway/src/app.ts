@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { PolicyEngine } from '../../core/src/index.js';
 import { SolanaSettlementManager } from '../../solana/src/settlement.js';
-import { parseMicroUsdc } from '../../core/src/money.js';
+import { formatMicroUsdc, parseMicroUsdc } from '../../core/src/money.js';
 import { requestFingerprint } from '../../core/src/fingerprint.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,6 +15,7 @@ import {
   resolveOperator,
   simulationRequested,
 } from './access.js';
+import { OperatorSessionStore, sessionCookie } from './session.js';
 
 export interface ProviderDefinition {
   id: string;
@@ -277,6 +278,29 @@ export function createGatewayApp(
   const allowSimulation = security.allowSimulation === true;
   const corsOrigins = security.corsOrigins ?? [];
   const maxJsonBytes = security.maxJsonBytes ?? 65_536;
+  const sessions = security.sessions ?? new OperatorSessionStore();
+  const secureCookies = security.secureCookies === true;
+
+  function clientAddress(header: (name: string) => string | undefined): string {
+    return header('x-real-ip') || header('x-forwarded-for')?.split(',')[0]?.trim() || 'local';
+  }
+
+  function currentOperator(source: { header(name: string): string | undefined }) {
+    if ((source.header('x-shlita-operator-key') ?? '').trim()) {
+      const resolved = resolveOperator(source, operators);
+      if (!resolved.ok) return resolved;
+      return { ok: true as const, ownerOrg: resolved.ownerOrg, via: 'header' as const, sessionId: undefined };
+    }
+    const session = sessions.readCookie(source.header('cookie'));
+    if (!session) return { ok: false as const, status: 401 as const };
+    return { ok: true as const, ownerOrg: session.organizationId, via: 'session' as const, sessionId: session.id };
+  }
+
+  function csrfRejected(source: { method: string; header(name: string): string | undefined }, operator: ReturnType<typeof currentOperator>): boolean {
+    if (!operator.ok || operator.via !== 'session' || !operator.sessionId) return false;
+    if (source.method === 'GET' || source.method === 'HEAD') return false;
+    return !sessions.csrfOk(operator.sessionId, source.header('x-shlita-csrf'));
+  }
 
   app.use('*', async (c, next) => {
     applyCors((name, value) => c.header(name, value), c.req.header('origin'), corsOrigins);
@@ -287,6 +311,63 @@ export function createGatewayApp(
   });
 
   // Health check endpoint for container and uptime monitoring
+  app.post('/v1/session', async (c) => {
+    const client = clientAddress((name) => c.req.header(name));
+    if (sessions.limited(client)) {
+      return c.json({ error: 'RATE_LIMITED', message: 'Too many sign-in attempts. Try again later.' }, 429);
+    }
+    const parsed = await readJsonObject(c.req.raw, maxJsonBytes);
+    if (!parsed.ok) return c.json(parsed.body, parsed.status);
+    const presented = typeof parsed.value.operatorKey === 'string' ? parsed.value.operatorKey : '';
+    if (!presented) {
+      sessions.recordFailure(client);
+      return c.json({ error: 'UNAUTHORIZED', message: 'Authentication required.' }, 401);
+    }
+    const resolved = resolveOperator({ header: (name) => (name === 'x-shlita-operator-key' ? presented : undefined) }, operators);
+    if (!resolved.ok) {
+      sessions.recordFailure(client);
+      return c.json(
+        resolved.status === 401
+          ? { error: 'UNAUTHORIZED', message: 'Authentication required.' }
+          : { error: 'FORBIDDEN', message: 'Forbidden.' },
+        resolved.status
+      );
+    }
+    sessions.clearFailures(client);
+    const session = sessions.open(resolved.ownerOrg);
+    c.header('Set-Cookie', sessionCookie(session.id, Math.floor((session.expiresAt - Date.now()) / 1000), secureCookies));
+    c.header('Cache-Control', 'no-store');
+    return c.json({
+      authenticated: true,
+      organizationId: session.organizationId,
+      expiresAt: session.expiresAt,
+      csrfToken: session.csrfToken,
+    });
+  });
+
+  app.get('/v1/session', (c) => {
+    const operator = currentOperator(c.req);
+    if (!operator.ok) return c.json({ authenticated: false }, 401);
+    const session = operator.sessionId ? sessions.readCookie(c.req.header('cookie')) : null;
+    return c.json({
+      authenticated: true,
+      organizationId: operator.ownerOrg,
+      expiresAt: session?.expiresAt ?? null,
+      csrfToken: session?.csrfToken ?? null,
+    });
+  });
+
+  app.post('/v1/session/logout', (c) => {
+    const operator = currentOperator(c.req);
+    if (operator.ok && csrfRejected(c.req, operator)) {
+      return c.json({ error: 'CSRF', message: 'A matching CSRF token is required.' }, 403);
+    }
+    if (operator.ok && operator.sessionId) sessions.close(operator.sessionId);
+    c.header('Set-Cookie', sessionCookie('', 0, secureCookies));
+    c.header('Cache-Control', 'no-store');
+    return c.json({ authenticated: false });
+  });
+
   app.get('/health', (c) => {
     return c.json({
       status: 'ok',
@@ -561,9 +642,17 @@ export function createGatewayApp(
     engine.recordPrivilegedAudit({ actor, agentId, action, decision, reason });
   }
 
-  function requireOwnedAgent(c: { req: { header(name: string): string | undefined; param(name: string): string } }, action: string) {
+  function requireOwnedAgent(c: { req: { method: string; header(name: string): string | undefined; param(name: string): string } }, action: string) {
     const agentId = c.req.param('id');
-    const operator = resolveOperator(c.req, operators);
+    const operator = currentOperator(c.req);
+    if (operator.ok && csrfRejected(c.req, operator)) {
+      auditPrivileged(agentId, action, 'BLOCKED', `operator:${operator.ownerOrg}`, 'CSRF');
+      return {
+        ok: false as const,
+        status: 403 as const,
+        body: { error: 'CSRF', message: 'A matching CSRF token is required.' },
+      };
+    }
     if (!operator.ok) {
       auditPrivileged(agentId, action, 'BLOCKED', 'anonymous', operator.status === 401 ? 'OPERATOR_AUTH_REQUIRED' : 'OPERATOR_FORBIDDEN');
       return {
@@ -589,7 +678,7 @@ export function createGatewayApp(
 
   // Get all registered agents, policies, and live financial metrics
   app.get('/v1/agents', (c) => {
-    const operator = resolveOperator(c.req, operators);
+    const operator = currentOperator(c.req);
     if (!operator.ok) {
       auditPrivileged('*', 'list-agents', 'BLOCKED', 'anonymous', 'OPERATOR_AUTH_REQUIRED');
       return c.json(
@@ -609,6 +698,8 @@ export function createGatewayApp(
 
       return {
         agentId: policy.agentId,
+        organizationId: operator.ownerOrg,
+        credentialStatus: 'enrolled',
         status: state?.status ?? 'ACTIVE',
         freezeReason: state?.freezeReason,
         spending: {
@@ -632,6 +723,138 @@ export function createGatewayApp(
     });
 
     return c.json({ agents });
+  });
+
+  app.post('/v1/agents', async (c) => {
+    const operator = currentOperator(c.req);
+    if (!operator.ok) {
+      return c.json(
+        operator.status === 401
+          ? { error: 'UNAUTHORIZED', message: 'Authentication required.' }
+          : { error: 'FORBIDDEN', message: 'Forbidden.' },
+        operator.status
+      );
+    }
+    if (csrfRejected(c.req, operator)) {
+      return c.json({ error: 'CSRF', message: 'A matching CSRF token is required.' }, 403);
+    }
+    const parsed = await readJsonObject(c.req.raw, maxJsonBytes);
+    if (!parsed.ok) return c.json(parsed.body, parsed.status);
+    const agentId = typeof parsed.value.agentId === 'string' ? parsed.value.agentId.trim() : '';
+    if (!/^[A-Za-z0-9._~-]{3,80}$/.test(agentId)) {
+      return c.json({ error: 'AGENT_ID_REJECTED', message: 'Agent id must be 3–80 letters, numbers, or . _ ~ -.' }, 400);
+    }
+    if (engine.getAgentOwnerOrg(agentId)) {
+      return c.json({ error: 'AGENT_EXISTS', message: 'An agent with that id already exists.' }, 409);
+    }
+    const perCall = parseMicroUsdc(parsed.value.maxPerCallMicroUsdc);
+    const budget = parseMicroUsdc(parsed.value.periodBudgetMicroUsdc);
+    if (!perCall.ok || !budget.ok) {
+      return c.json({ error: 'AMOUNT_REJECTED', message: 'Budgets must be positive integer micro-USDC strings.' }, 400);
+    }
+    if (perCall.amount > budget.amount) {
+      return c.json({ error: 'AMOUNT_REJECTED', message: 'The per-call limit cannot exceed the period budget.' }, 400);
+    }
+    const vendors = Array.isArray(parsed.value.allowedVendors)
+      ? parsed.value.allowedVendors.filter((vendor): vendor is string => typeof vendor === 'string' && vendor.length > 0 && vendor.length <= 200)
+      : [];
+    if (vendors.length === 0) {
+      return c.json({ error: 'VENDOR_REQUIRED', message: 'At least one allowed provider host is required.' }, 400);
+    }
+    const created = engine.registerAgent(
+      {
+        agentId,
+        allowedVendors: vendors,
+        maxPerCallMicroUsdc: perCall.amount,
+        periodBudgetMicroUsdc: budget.amount,
+        periodSeconds: 86_400,
+        circuitBreaker: { maxConsecutiveErrors: 3, maxCallsPerMinute: 10 },
+      },
+      { ownerOrg: operator.ownerOrg }
+    );
+    return c.json({ agentId, apiKey: created.apiKey, credentialStatus: 'issued' }, 201);
+  });
+
+  app.get('/v1/operations', (c) => {
+    const operator = currentOperator(c.req);
+    if (!operator.ok) {
+      return c.json(
+        operator.status === 401
+          ? { error: 'UNAUTHORIZED', message: 'Authentication required.' }
+          : { error: 'FORBIDDEN', message: 'Forbidden.' },
+        operator.status
+      );
+    }
+    const limit = Math.min(100, Math.max(1, Number(c.req.query('limit')) || 50));
+    const offset = Math.max(0, Number(c.req.query('offset')) || 0);
+    const operations = engine.listOrganizationOperations(operator.ownerOrg);
+    return c.json({ operations: operations.slice(offset, offset + limit), total: operations.length });
+  });
+
+  app.get('/v1/dashboard', (c) => {
+    const operator = currentOperator(c.req);
+    if (!operator.ok) {
+      return c.json(
+        operator.status === 401
+          ? { error: 'UNAUTHORIZED', message: 'Authentication required.' }
+          : { error: 'FORBIDDEN', message: 'Forbidden.' },
+        operator.status
+      );
+    }
+    const policies = engine.getAllPolicies().filter((policy) => engine.getAgentOwnerOrg(policy.agentId) === operator.ownerOrg);
+    const states = engine.getAllStates().filter((state) => engine.getAgentOwnerOrg(state.agentId) === operator.ownerOrg);
+    const operations = engine.listOrganizationOperations(operator.ownerOrg);
+    const accountedStates = new Set([
+      'ACCOUNTING_COMMITTED',
+      'SETTLEMENT_PREPARED',
+      'SETTLEMENT_SUBMITTED',
+      'SETTLEMENT_CONFIRMATION_PENDING',
+      'SETTLEMENT_CONFIRMED',
+      'SETTLEMENT_FINALIZED',
+      'SETTLEMENT_PENDING',
+    ]);
+    let accounted = 0n;
+    const settlement: Record<string, number> = {};
+    const byVendor: Record<string, bigint> = {};
+    let blocked = 0;
+    let failed = 0;
+    let reconciliation = 0;
+    for (const operation of operations) {
+      const state = String(operation.state);
+      const reserved = String(operation.reservedAmountMicroUsdc ?? '0');
+      if (accountedStates.has(state)) accounted += BigInt(reserved);
+      if (state === 'POLICY_REJECTED') blocked += 1;
+      if (state === 'VENDOR_FAILED' || state === 'SETTLEMENT_FAILED') failed += 1;
+      if (state === 'RECONCILIATION_REQUIRED' || state === 'EXECUTION_OUTCOME_UNKNOWN') reconciliation += 1;
+      const settlementStatus = String(operation.settlementStatus ?? 'NOT_SUBMITTED');
+      settlement[settlementStatus] = (settlement[settlementStatus] ?? 0) + 1;
+      if (accountedStates.has(state)) {
+        const vendor = String(operation.vendor);
+        byVendor[vendor] = (byVendor[vendor] ?? 0n) + BigInt(reserved);
+      }
+    }
+    let pending = 0n;
+    for (const state of states) pending += state.activePendingReservationsMicroUsdc;
+    return c.json({
+      generatedAt: new Date().toISOString(),
+      source: 'ledger',
+      organizationId: operator.ownerOrg,
+      agents: {
+        total: policies.length,
+        active: states.filter((state) => state.status === 'ACTIVE').length,
+        frozen: states.filter((state) => state.status === 'AGENT_FROZEN').length,
+        circuitTripped: states.filter((state) => state.status === 'CIRCUIT_TRIPPED').length,
+      },
+      accountedSpendMicroUsdc: accounted.toString(),
+      accountedSpend: formatMicroUsdc(accounted.toString()),
+      pendingReservationsMicroUsdc: pending.toString(),
+      pendingReservations: formatMicroUsdc(pending.toString()),
+      blocked,
+      failed,
+      reconciliation,
+      settlement,
+      spendByVendor: Object.fromEntries(Object.entries(byVendor).map(([vendor, amount]) => [vendor, { microUsdc: amount.toString(), formatted: formatMicroUsdc(amount.toString()) }])),
+    });
   });
 
   // Emergency Freeze (operator, organization scoped)
@@ -669,7 +892,7 @@ export function createGatewayApp(
   });
 
   app.post('/v1/operations/:operationId/settle', async (c) => {
-    const operator = resolveOperator(c.req, operators);
+    const operator = currentOperator(c.req);
     if (!operator.ok) {
       return c.json(
         operator.status === 401
@@ -677,6 +900,9 @@ export function createGatewayApp(
           : { error: 'FORBIDDEN', message: 'Forbidden.' },
         operator.status
       );
+    }
+    if (csrfRejected(c.req, operator)) {
+      return c.json({ error: 'CSRF', message: 'A matching CSRF token is required.', fundsMoved: false }, 403);
     }
     if (security.settlementEnabled !== true || !security.settlementDestination) {
       return c.json({ error: 'SETTLEMENT_DISABLED', message: 'Settlement is disabled.', fundsMoved: false }, 403);
@@ -705,7 +931,7 @@ export function createGatewayApp(
   });
 
   app.get('/v1/reconciliation', (c) => {
-    const operator = resolveOperator(c.req, operators);
+    const operator = currentOperator(c.req);
     if (!operator.ok) {
       auditPrivileged('*', 'read-reconciliation', 'BLOCKED', 'anonymous', operator.status === 401 ? 'OPERATOR_AUTH_REQUIRED' : 'OPERATOR_FORBIDDEN');
       return c.json(
@@ -720,7 +946,7 @@ export function createGatewayApp(
 
   // Audit Logs & Active Reservations
   app.get('/v1/audit', (c) => {
-    const operator = resolveOperator(c.req, operators);
+    const operator = currentOperator(c.req);
     if (!operator.ok) {
       auditPrivileged('*', 'read-audit', 'BLOCKED', 'anonymous', operator.status === 401 ? 'OPERATOR_AUTH_REQUIRED' : 'OPERATOR_FORBIDDEN');
       return c.json(
@@ -736,7 +962,7 @@ export function createGatewayApp(
 
   // Live Telemetry Stream Feed
   app.get('/v1/telemetry', (c) => {
-    const operator = resolveOperator(c.req, operators);
+    const operator = currentOperator(c.req);
     if (!operator.ok) {
       auditPrivileged('*', 'read-telemetry', 'BLOCKED', 'anonymous', operator.status === 401 ? 'OPERATOR_AUTH_REQUIRED' : 'OPERATOR_FORBIDDEN');
       return c.json(

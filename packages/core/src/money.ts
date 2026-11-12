@@ -3,6 +3,17 @@ export const MAX_MICRO_USDC = 1_000_000_000_000n;
 
 const INTEGER_TEXT = /^(0|[1-9][0-9]*)$/;
 
+/** Format a stored micro-USDC integer without converting it through a JavaScript number. */
+export function formatMicroUsdc(value: string): string {
+  if (!INTEGER_TEXT.test(value)) {
+    throw new Error('Amount must be a non-negative integer string.');
+  }
+  const amount = BigInt(value);
+  const whole = amount / 1_000_000n;
+  const fraction = (amount % 1_000_000n).toString().padStart(6, '0');
+  return `${whole.toString()}.${fraction}`;
+}
+
 export type ParsedAmount =
   | { ok: true; amount: bigint }
   | { ok: false; message: string };

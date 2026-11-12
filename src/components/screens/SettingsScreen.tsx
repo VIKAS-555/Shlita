@@ -7,7 +7,6 @@ import {
   Users,
   Key,
   Lock,
-  CheckCircle2,
   AlertTriangle,
 } from 'lucide-react';
 
@@ -15,12 +14,6 @@ export const SettingsScreen: React.FC = () => {
   const [autoRevokeOnAnomaly, setAutoRevokeOnAnomaly] = useState(true);
   const [requireMultiSigOver1k, setRequireMultiSigOver1k] = useState(true);
   const [selectedRpc, setSelectedRpc] = useState('https://mainnet.helius-rpc.com/?api-key=...');
-  const [savedSuccess, setSavedSuccess] = useState(false);
-
-  const handleSave = () => {
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 2000);
-  };
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -28,16 +21,9 @@ export const SettingsScreen: React.FC = () => {
       <div className="pb-4 border-b border-border">
         <h2 className="text-xl font-bold text-text-primary tracking-tight">Settings & Security Governance</h2>
         <p className="text-xs text-text-muted mt-1">
-          Manage workspace access, on-chain Solana RPC endpoints, and autonomous agent kill-switches.
+          These controls are not connected to the ledger. Nothing on this screen is saved or sent to Solana.
         </p>
       </div>
-
-      {savedSuccess && (
-        <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 rounded-xl text-xs flex items-center gap-2 font-mono">
-          <CheckCircle2 size={16} />
-          <span>Security preferences updated and synchronized on-chain.</span>
-        </div>
-      )}
 
       {/* Security Policies Box */}
       <div className="bg-card border border-border rounded-2xl p-6 glow-card space-y-4">
@@ -139,10 +125,11 @@ export const SettingsScreen: React.FC = () => {
 
         <div className="pt-2 flex justify-end">
           <button
-            onClick={handleSave}
-            className="bg-accent-violet hover:bg-accent-violet/90 text-white font-semibold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-accent-violet/20 transition cursor-pointer"
+            type="button"
+            disabled
+            className="bg-border text-text-muted font-semibold text-xs px-5 py-2.5 rounded-xl cursor-not-allowed"
           >
-            Save Security Changes
+            Save is unavailable — no ledger write exists for these controls
           </button>
         </div>
       </div>

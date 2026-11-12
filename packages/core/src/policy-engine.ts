@@ -211,6 +211,10 @@ export class PolicyEngine {
     return policies.map((p) => this.getAgentState(p.agentId));
   }
 
+  listOrganizationOperations(ownerOrg: string) {
+    return this.ledger.listOrganizationOperations(ownerOrg);
+  }
+
   getAuditLogs(limit = 100): AuditLogEntry[] {
     const records = this.ledger.getAuditLogs(limit);
     return records.map((r) => {
