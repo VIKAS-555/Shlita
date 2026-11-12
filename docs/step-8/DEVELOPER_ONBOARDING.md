@@ -11,7 +11,7 @@
 
 Welcome to the Shlita Staging Pilot. Shlita acts as a **Financial Firewall and Autonomous Governance Layer** placed between your AI agent runtime and upstream commercial APIs (such as OpenAI, Anthropic, or specialized web3 endpoints).
 
-During this pilot, your agent interacts with the Shlita Gateway using the standalone TypeScript `@shlita/sdk`. The gateway enforces spending caps, reservation atomicity, and ledger immutability before requests reach external LLM endpoints.
+During this pilot, your agent interacts with the Shlita Gateway using the standalone TypeScript `shlita-sdk`. The gateway enforces spending caps, reservation atomicity, and ledger immutability before requests reach external LLM endpoints.
 
 ---
 
@@ -26,7 +26,7 @@ During this pilot, your agent interacts with the Shlita Gateway using the standa
 Until automated self-service registration is deployed, credentials are generated and delivered securely by Shlita Platform Operators:
 - **Assigned Agent ID:** `agent_prod_reader` (or `agent_prod_writer`)
 - **Agent Bearer Token:** `agt_sec_...`
-- **Staging Gateway URL:** `https://staging-gateway.shlita.internal`
+- **Staging Gateway URL:** `https://gateway.staging.shlita.xyz` (or local `http://localhost:4000`)
 
 ### Step 3: Install the Standalone SDK
 Install the standalone Shlita client package into your agent application repository:
@@ -41,7 +41,7 @@ npm install /path/to/packages/sdk
 ### Step 4: Configure Environment Variables
 Add the required connection parameters to your application's `.env`:
 ```bash
-SHLITA_GATEWAY_URL="https://staging-gateway.shlita.internal"
+SHLITA_GATEWAY_URL="https://gateway.staging.shlita.xyz"
 SHLITA_AGENT_KEY="agt_sec_pilot_alpha_reader_001"
 OPENAI_API_KEY="sk-mock-pilot-upstream-key"
 ```
@@ -49,7 +49,7 @@ OPENAI_API_KEY="sk-mock-pilot-upstream-key"
 ### Step 5: Initialize the Shlita Client
 Instantiate the typed client in your TypeScript or JavaScript application:
 ```typescript
-import { ShlitaClient } from '@shlita/sdk';
+import { ShlitaClient } from 'shlita-sdk';
 
 const shlita = new ShlitaClient({
   baseUrl: process.env.SHLITA_GATEWAY_URL!,

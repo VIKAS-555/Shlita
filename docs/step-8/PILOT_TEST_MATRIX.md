@@ -266,7 +266,7 @@ This test matrix specifies the complete suite of deterministic verification proc
   npm pack /Users/polymath/Antigravity/Shlita/packages/sdk
   npm install ./shlita-sdk-*.tgz
   ```
-- **Verification:** `node -e "const { ShlitaClient } = require('@shlita/sdk'); console.log(typeof ShlitaClient);"` prints `function`.
+- **Verification:** `node -e "import('shlita-sdk').then(({ ShlitaClient }) => console.log(typeof ShlitaClient));"` prints `function`.
 
 #### `TEST-SDK-02`: SDK Automated Reservation Header Injection
 - **Objective:** Verify SDK wraps outgoing OpenAI API calls and automatically negotiates Shlita headers.

@@ -22,7 +22,7 @@
 | **GATE-08** | Standalone Developer SDK Usability | PASS | **PASS** | **PASS** | Isolated SDK packaging in `packages/sdk`, external installation verified in CI via tarball artifact. |
 | **GATE-09** | Secrets Hygiene & Config Hardening | PASS | **PASS** | **PASS** | Zero hardcoded private keys or secrets committed; `.env.example` sanitization verified. |
 | **GATE-10** | Deployed Staging HTTPS Gateway with TLS | **BLOCKED** | **BLOCKED** | **BLOCKED** | Public static site (`shlita.vercel.app`) lacks backend proxy. Staging HTTPS VM blueprint finalized in Step 8; pending server provisioning. |
-| **GATE-11** | Real-Time Observability & Monitoring | **BLOCKED** | **BLOCKED** | **BLOCKED** | In-process `/healthz` and audit endpoints exist, but centralized Prometheus scraper and PagerDuty alert sink are not yet live. |
+| **GATE-11** | Real-Time Observability & Monitoring | **BLOCKED** | **BLOCKED** | **BLOCKED** | In-process `/ready`, `/health`, and audit endpoints exist, but centralized Prometheus scraper and PagerDuty alert sink are not yet live. |
 | **GATE-12** | Operator Runbooks & Incident Protocols | PARTIAL | **PASS** | **PASS** | Comprehensive runbooks, escalation matrices, and test matrices finalized in `docs/step-8/`. |
 
 ---

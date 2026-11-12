@@ -19,6 +19,8 @@
 
 ## 2. Emergency Escalation Roster & Contacts
 
+*(Note: The following contacts are illustrative templates for pilot staging configuration; replace with active partner escalation webhooks upon provisioning.)*
+
 - **Primary SRE On-Call:** `sre-oncall@shlita.internal` (PagerDuty: `shlita-staging-sre`)
 - **Security Incident Commander:** `security@shlita.internal`
 - **Partner Technical Liaison:** `partner-ops@pilot-partner.example.com`
@@ -134,7 +136,7 @@
 4. **Restart Container & Validate Recovery:**
    ```bash
    docker start shlita-gateway
-   curl -s https://staging-gateway.shlita.internal/healthz
+   curl -s http://127.0.0.1:4000/ready
    ```
 
 ---

@@ -84,7 +84,7 @@ flowchart TD
 - **Host Spec:** 1x AMD64/ARM64 Virtual Machine (2 vCPU, 4GB RAM, 40GB NVMe SSD).
 - **OS:** Ubuntu 24.04 LTS or Debian 12.
 - **Container Runtime:** Docker Engine 26+ with Compose v2.
-- **Base Image:** `node:22-alpine` (multi-stage build from repo `Dockerfile`).
+- **Base Image:** `node:22-bookworm-slim` (multi-stage build from repo `Dockerfile`, running as non-root user `shlita` with UID/GID 10001).
 - **Process User:** Non-root `USER node` (UID 1000).
 
 ### B. Ingress, Domain & TLS
@@ -116,11 +116,13 @@ flowchart TD
 - **Filesystem Options:** Ext4 or XFS with direct local attachment. Network filesystem protocols (NFS, SMB, CIFS) are **strictly prohibited** due to unreliable SQLite lock lease behavior.
 
 ### D. Environment & Secrets Provisioning
-Staging `.env` strictly adheres to `packages/gateway/src/security-config.ts` validations:
+Staging `.env` strictly adheres to `packages/gateway/src/security-config.ts` validations.
+Note: In locked mode (`SHLITA_ENV=staging` or `SHLITA_ENV=production`), `security-config.ts` fails closed if `SHLITA_ALLOW_SIMULATION=true`. Therefore, staging operates with `SHLITA_ALLOW_SIMULATION=false` using sandbox upstream provider keys (e.g. Helius Devnet / Tavily free tiers). If non-billable simulated tool calls without outbound network egress are specifically desired for local/CI integration testing, `SHLITA_ENV=development` is used with explicit production-strength keys and persistent storage paths (as verified in the CI persistent volume suite).
+
 ```bash
 SHLITA_ENV=staging
 PORT=4000
-SHLITA_ALLOW_SIMULATION=true           # Permitted during developer sandbox testing
+SHLITA_ALLOW_SIMULATION=false          # Locked mode: outbound proxy requires sandbox provider keys
 SHLITA_SEED_DEMO=false                # No hardcoded demo agents in pilot
 SHLITA_DB_PATH=/var/lib/shlita/ledger.db
 SHLITA_STATE_DIR=/var/lib/shlita
