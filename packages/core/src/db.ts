@@ -2032,6 +2032,43 @@ export class SqliteLedger {
     }
   }
 
+  listOrganizationOperations(ownerOrg: string): Array<Record<string, unknown>> {
+    if (!this.db) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT o.id, o.agent_id, o.vendor, o.method, o.path, o.decision, o.estimated_cost_micro_usdc,
+                o.reserved_amount_micro_usdc, o.actual_cost_micro_usdc, o.cost_basis, o.state,
+                o.settlement_status, o.created_at, o.updated_at,
+                c.signature, c.cluster, c.mint, c.destination, c.status AS chain_status
+         FROM financial_operations o
+         JOIN agents a ON a.id = o.agent_id
+         LEFT JOIN chain_settlements c ON c.operation_id = o.id
+         WHERE a.owner_org = ?
+         ORDER BY o.created_at DESC`
+      )
+      .all(ownerOrg) as any[];
+    return rows.map((row) => ({
+      operationId: row.id,
+      agentId: row.agent_id,
+      vendor: row.vendor,
+      method: row.method,
+      path: row.path,
+      decision: row.decision,
+      estimatedCostMicroUsdc: row.estimated_cost_micro_usdc,
+      reservedAmountMicroUsdc: row.reserved_amount_micro_usdc,
+      actualCostMicroUsdc: row.actual_cost_micro_usdc,
+      costBasis: row.cost_basis,
+      state: row.state,
+      settlementStatus: row.chain_status ?? row.settlement_status ?? 'NOT_SUBMITTED',
+      signature: row.signature ?? null,
+      cluster: row.cluster ?? null,
+      mint: row.mint ?? null,
+      destination: row.destination ?? null,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  }
+
   private presentSettlement(row: any): Record<string, unknown> {
     return {
       settlementId: row.id,

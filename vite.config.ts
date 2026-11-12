@@ -8,6 +8,10 @@ export default defineConfig({
   server: {
     port: 3000,
     host: true,
+    proxy: {
+      '/v1': 'http://127.0.0.1:4000',
+      '/health': 'http://127.0.0.1:4000',
+    },
   },
   build: {
     outDir: 'dist-ui',

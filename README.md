@@ -11,8 +11,10 @@
 [![Tests](https://img.shields.io/badge/Tests-25%20Passing-success?style=flat-square)](tests)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
-- ⚡ **Primary Live Application (Vercel Edge)**: [https://shlita.vercel.app/](https://shlita.vercel.app/)
-- 🌐 **Backup Live Mirror (GitHub Pages)**: [https://xiaoarnav.github.io/Shlita/](https://xiaoarnav.github.io/Shlita/)
+- ⚡ **Static demo (Vercel)**: [https://shlita.vercel.app/](https://shlita.vercel.app/) serves the built interface only. It does not host the ledger.
+- 🌐 **Static mirror (GitHub Pages)**: [https://xiaoarnav.github.io/Shlita/](https://xiaoarnav.github.io/Shlita/) is the same static build.
+
+The financial control plane is the gateway process plus its SQLite file. `npm start` serves the built interface and `/v1` on the same origin, so the operator session cookie stays on that host. The operator key is not bundled into the frontend. A hosted static site is not a persistent ledger, and this repository does not deploy the gateway.
 - 📺 **Full Video Walkthrough**: [Watch on YouTube (https://youtu.be/o5vHfcUjDJE)](https://youtu.be/o5vHfcUjDJE)
 - 📖 **DEV.to Deep Dive Writeup**: [Why We Built a Financial Firewall for Autonomous AI Agents on Solana](https://dev.to/polymath_arnav/why-we-built-a-financial-firewall-for-autonomous-ai-agents-on-solana-acid-reservations-zero-key-4mfe)
 
@@ -148,7 +150,7 @@ Demonstrates authorized micro-transactions, prompt-injection vendor blocking, pe
 npm run build
 npm start
 ```
-Open [http://localhost:4000](http://localhost:4000) to view the live dashboard.
+Open [http://127.0.0.1:4000](http://127.0.0.1:4000). The default screen asks for the operator key. Add `?demo=1` for the labeled sample dashboard. The sample balances are not ledger records.
 
 Development startup without `SHLITA_OPERATOR_KEY` generates a local operator key under `.shlita/` and does not print it. Production (`SHLITA_ENV=production`) refuses to start unless `.env.example` is copied to `.env` and the placeholders are replaced with strong values. Demo agent enrollment runs only when `SHLITA_SEED_DEMO=true` outside production. Simulation runs only when `SHLITA_ALLOW_SIMULATION=true` outside production.
 

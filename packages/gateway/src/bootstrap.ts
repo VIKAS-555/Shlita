@@ -81,6 +81,7 @@ export function bootFromEnv(env: Record<string, string | undefined>): BootSucces
     operators: [{ key: config.operatorKey, ownerOrg: config.operatorOrg }],
     allowSimulation: config.allowSimulation,
     corsOrigins: config.corsOrigins,
+    secureCookies: config.production,
     settlementEnabled: env.SHLITA_SETTLEMENT_ENABLED === 'true',
     settlementDestination: env.SHLITA_SETTLEMENT_DESTINATION,
   });

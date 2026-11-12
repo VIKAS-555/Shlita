@@ -133,7 +133,7 @@ export const App: React.FC = () => {
     let active = true;
     const checkBackend = async () => {
       try {
-        const res = await fetch('http://localhost:4000/health', {
+        const res = await fetch('/health', {
           method: 'GET',
           signal: AbortSignal.timeout(2000),
         });
@@ -719,6 +719,9 @@ export const App: React.FC = () => {
           collapsedSidebar ? 'ml-20' : 'ml-64'
         }`}
       >
+        <a href={window.location.pathname} className="bg-amber-500/15 text-amber-200 text-xs px-4 py-2 border-b border-amber-500/30">
+          Demo mode. Every balance, signature, and approval on this screen is sample data, not the ledger.
+        </a>
         {/* Top Header Navigation */}
         <TopNav
           currentScreen={currentScreen}
