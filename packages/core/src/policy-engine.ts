@@ -215,6 +215,34 @@ export class PolicyEngine {
     return this.ledger.listOrganizationOperations(ownerOrg);
   }
 
+  schemaVersion(): number {
+    return this.ledger.schemaVersion();
+  }
+
+  storageReady(): boolean {
+    return this.ledger.storageReady();
+  }
+
+  recordAttempt(kind: string, client: string, at: number): void {
+    this.ledger.recordAttempt(kind, client, at);
+  }
+
+  countAttempts(kind: string, client: string, since: number): number {
+    return this.ledger.countAttempts(kind, client, since);
+  }
+
+  clearAttempts(kind: string, client: string): void {
+    this.ledger.clearAttempts(kind, client);
+  }
+
+  operationalCounts() {
+    return this.ledger.operationalCounts();
+  }
+
+  backupTo(dest: string): Promise<void> {
+    return this.ledger.backupTo(dest);
+  }
+
   getAuditLogs(limit = 100): AuditLogEntry[] {
     const records = this.ledger.getAuditLogs(limit);
     return records.map((r) => {

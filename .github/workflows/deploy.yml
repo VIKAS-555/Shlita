@@ -59,6 +59,95 @@ jobs:
         with:
           path: './dist-ui'
 
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build the gateway image
+        run: docker build -t shlita:step5 .
+
+      - name: Production startup fails closed inside the image
+        run: |
+          set +e
+          docker run --rm -e SHLITA_ENV=production shlita:step5
+          status=$?
+          set -e
+          test "$status" -ne 0
+
+      - name: Persistent volume survives a container restart
+        run: |
+          set -eu
+          KEY="$(openssl rand -hex 24)"
+          docker volume create shlita-step5
+          docker run -d --name shlita-step5 \
+            -e SHLITA_ENV=development \
+            -e SHLITA_OPERATOR_KEY="$KEY" \
+            -e SHLITA_OPERATOR_ORG=org-ci \
+            -e SHLITA_ALLOW_SIMULATION=true \
+            -e SHLITA_DB_PATH=/var/lib/shlita/ledger.db \
+            -e SHLITA_STATE_DIR=/var/lib/shlita \
+            -p 4010:4000 \
+            -v shlita-step5:/var/lib/shlita \
+            shlita:step5
+          ready() {
+            curl -sf http://127.0.0.1:4010/ready
+          }
+          for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+            if ready; then break; fi
+            sleep 1
+          done
+          ready || { docker logs shlita-step5; exit 1; }
+          curl -sf -o /tmp/shlita-agents.json -w '%{http_code}' http://127.0.0.1:4010/v1/agents | grep -qx 401
+          CSRF="$(curl -sf -D /tmp/shlita-session.headers -o /tmp/shlita-session.json \
+            -H 'content-type: application/json' \
+            -d "{\"operatorKey\":\"$KEY\"}" \
+            http://127.0.0.1:4010/v1/session | python3 -c 'import json,sys; print(json.load(sys.stdin)["csrfToken"])')"
+          COOKIE="$(awk 'BEGIN{IGNORECASE=1} /^set-cookie:/ {print $2}' /tmp/shlita-session.headers | cut -d';' -f1)"
+          test -n "$COOKIE"
+          grep -q HttpOnly /tmp/shlita-session.headers
+          curl -sf -D - -o /tmp/shlita-enroll.json \
+            -H "cookie: $COOKIE" \
+            -H "x-shlita-csrf: $CSRF" \
+            -H 'content-type: application/json' \
+            -d '{"agentId":"agent-ci","allowedVendors":["api.helius.xyz"],"maxPerCallMicroUsdc":"50000","periodBudgetMicroUsdc":"1000000"}' \
+            http://127.0.0.1:4010/v1/agents | head -n 1 | grep -q '201'
+          AGENT_KEY="$(python3 -c 'import json; print(json.load(open("/tmp/shlita-enroll.json"))["apiKey"])')"
+          curl -sf -D /tmp/shlita-proxy.headers -o /dev/null \
+            -H "content-type: application/json" \
+            -H "x-shlita-api-key: $AGENT_KEY" \
+            -H 'x-shlita-simulation: true' \
+            -d '{"agentId":"agent-ci","vendor":"api.helius.xyz","method":"POST","path":"/v0/token-metadata","idempotencyKey":"ci-op-01","simulate":true}' \
+            http://127.0.0.1:4010/v1/proxy
+          grep -q 'x-shlita-spend-micro-usdc: 10000' /tmp/shlita-proxy.headers
+          docker stop shlita-step5
+          docker rm shlita-step5
+          docker run -d --name shlita-step5 \
+            -e SHLITA_ENV=development \
+            -e SHLITA_OPERATOR_KEY="$KEY" \
+            -e SHLITA_OPERATOR_ORG=org-ci \
+            -e SHLITA_ALLOW_SIMULATION=true \
+            -e SHLITA_DB_PATH=/var/lib/shlita/ledger.db \
+            -e SHLITA_STATE_DIR=/var/lib/shlita \
+            -p 4010:4000 \
+            -v shlita-step5:/var/lib/shlita \
+            shlita:step5
+          for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+            if ready; then break; fi
+            sleep 1
+          done
+          ready || { docker logs shlita-step5; exit 1; }
+          CSRF="$(curl -sf -D /tmp/shlita-session.headers -o /tmp/shlita-session.json \
+            -H 'content-type: application/json' \
+            -d "{\"operatorKey\":\"$KEY\"}" \
+            http://127.0.0.1:4010/v1/session | python3 -c 'import json,sys; print(json.load(sys.stdin)["csrfToken"])')"
+          COOKIE="$(awk 'BEGIN{IGNORECASE=1} /^set-cookie:/ {print $2}' /tmp/shlita-session.headers | cut -d';' -f1)"
+          curl -sf -H "cookie: $COOKIE" http://127.0.0.1:4010/v1/operations | python3 -c 'import json,sys; rows=json.load(sys.stdin)["operations"]; assert len(rows)==1; assert rows[0]["reservedAmountMicroUsdc"]=="10000"; assert rows[0]["signature"] is None'
+          docker logs shlita-step5 | grep -q "$KEY" && exit 1 || true
+          docker rm -f shlita-step5
+          docker volume rm shlita-step5
+
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment:

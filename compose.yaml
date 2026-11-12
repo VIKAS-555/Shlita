@@ -1,0 +1,22 @@
+services:
+  gateway:
+    build: .
+    ports:
+      - "4010:4000"
+    environment:
+      SHLITA_ENV: development
+      SHLITA_OPERATOR_KEY: ${SHLITA_OPERATOR_KEY:?set a local operator key of at least 32 characters}
+      SHLITA_OPERATOR_ORG: ${SHLITA_OPERATOR_ORG:-org-compose}
+      SHLITA_ALLOW_SIMULATION: "true"
+      SHLITA_SEED_DEMO: "false"
+      SHLITA_DB_PATH: /var/lib/shlita/ledger.db
+      SHLITA_STATE_DIR: /var/lib/shlita
+      SHLITA_BACKUP_DIR: /var/lib/shlita/backups
+      SHLITA_TRUSTED_PROXIES: ""
+      PORT: "4000"
+    volumes:
+      - shlita-data:/var/lib/shlita
+    restart: unless-stopped
+
+volumes:
+  shlita-data:

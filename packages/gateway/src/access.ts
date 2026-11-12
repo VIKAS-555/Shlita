@@ -36,6 +36,12 @@ export interface GatewaySecurityOptions {
   /** When true, the session cookie is marked Secure. Use this on HTTPS. */
   secureCookies?: boolean;
   sessions?: import('./session.js').OperatorSessionStore;
+  trustedProxies?: readonly string[];
+  publicOrigin?: string;
+  logger?: (line: string) => void;
+  lifecycle?: { accepting: boolean };
+  /** Test seam for the immediate TCP peer. Production reads the socket. */
+  remoteAddress?: (header: (name: string) => string | undefined) => string | undefined;
 }
 
 export interface AgentPrincipal {
@@ -56,7 +62,7 @@ export function applyCors(
   setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, x-shlita-api-key, x-shlita-operator-key, x-shlita-simulation'
+    'Content-Type, Authorization, x-shlita-api-key, x-shlita-operator-key, x-shlita-simulation, x-shlita-csrf'
   );
   setHeader('Access-Control-Max-Age', '600');
 }

@@ -7,41 +7,68 @@ export interface OperatorSession {
   expiresAt: number;
 }
 
+export interface AttemptStore {
+  count(kind: string, client: string, since: number): number;
+  add(kind: string, client: string, at: number): void;
+  clear(kind: string, client: string): void;
+}
+
 interface StoredSession extends OperatorSession {}
 
 /**
  * Short-lived operator sessions. The long-lived operator key is checked once
  * at login and is not stored in the session or sent back to the browser.
+ * Session rows are process-local. A restart requires a new sign-in.
+ * Login attempts can use a durable store so a restart does not clear a lockout.
  */
 export class OperatorSessionStore {
   private readonly sessions = new Map<string, StoredSession>();
   private readonly failures = new Map<string, number[]>();
+  private readonly mutations = new Map<string, number[]>();
   private readonly now: () => number;
   private readonly ttlMs: number;
   private readonly maxFailures: number;
+  private readonly maxMutations: number;
   private readonly windowMs: number;
+  private readonly rateStore?: AttemptStore;
 
-  constructor(options: { now?: () => number; ttlMs?: number; maxFailures?: number; windowMs?: number } = {}) {
+  constructor(
+    options: {
+      now?: () => number;
+      ttlMs?: number;
+      maxFailures?: number;
+      maxMutations?: number;
+      windowMs?: number;
+      rateStore?: AttemptStore;
+    } = {}
+  ) {
     this.now = options.now ?? (() => Date.now());
     this.ttlMs = options.ttlMs ?? 15 * 60 * 1000;
     this.maxFailures = options.maxFailures ?? 8;
+    this.maxMutations = options.maxMutations ?? 60;
     this.windowMs = options.windowMs ?? 15 * 60 * 1000;
+    this.rateStore = options.rateStore;
   }
 
   limited(client: string): boolean {
-    this.pruneFailures(client);
-    return (this.failures.get(client)?.length ?? 0) >= this.maxFailures;
+    return this.count('login', client, this.failures) >= this.maxFailures;
   }
 
   recordFailure(client: string): void {
-    this.pruneFailures(client);
-    const rows = this.failures.get(client) ?? [];
-    rows.push(this.now());
-    this.failures.set(client, rows);
+    this.add('login', client, this.failures);
   }
 
   clearFailures(client: string): void {
+    if (this.rateStore) this.rateStore.clear('login', client);
     this.failures.delete(client);
+  }
+
+  mutationLimited(client: string): boolean {
+    return this.count('mutate', client, this.mutations) >= this.maxMutations;
+  }
+
+  recordMutation(client: string): void {
+    this.add('mutate', client, this.mutations);
   }
 
   open(organizationId: string): OperatorSession {
@@ -56,6 +83,7 @@ export class OperatorSessionStore {
   }
 
   readCookie(cookieHeader: string | undefined): OperatorSession | null {
+    this.sweepExpired();
     const id = readCookieValue(cookieHeader, 'shlita_session');
     if (!id) return null;
     const session = this.sessions.get(id);
@@ -63,6 +91,9 @@ export class OperatorSessionStore {
     if (session.expiresAt <= this.now()) {
       this.sessions.delete(id);
       return null;
+    }
+    if (session.expiresAt - this.now() < this.ttlMs / 3) {
+      session.expiresAt = this.now() + this.ttlMs;
     }
     return session;
   }
@@ -80,13 +111,38 @@ export class OperatorSessionStore {
     this.sessions.delete(sessionId);
   }
 
-  private pruneFailures(client: string): void {
-    const rows = this.failures.get(client);
+  private count(kind: string, client: string, memory: Map<string, number[]>): number {
+    const since = this.now() - this.windowMs;
+    if (this.rateStore) return this.rateStore.count(kind, client, since);
+    this.prune(memory, client, since);
+    return memory.get(client)?.length ?? 0;
+  }
+
+  private add(kind: string, client: string, memory: Map<string, number[]>): void {
+    const at = this.now();
+    if (this.rateStore) {
+      this.rateStore.add(kind, client, at);
+      return;
+    }
+    const since = at - this.windowMs;
+    this.prune(memory, client, since);
+    const rows = memory.get(client) ?? [];
+    rows.push(at);
+    memory.set(client, rows);
+  }
+
+  private sweepExpired(): void {
+    for (const [id, session] of this.sessions) {
+      if (session.expiresAt <= this.now()) this.sessions.delete(id);
+    }
+  }
+
+  private prune(memory: Map<string, number[]>, client: string, since: number): void {
+    const rows = memory.get(client);
     if (!rows) return;
-    const cutoff = this.now() - this.windowMs;
-    const kept = rows.filter((at) => at >= cutoff);
-    if (kept.length === 0) this.failures.delete(client);
-    else this.failures.set(client, kept);
+    const kept = rows.filter((at) => at >= since);
+    if (kept.length === 0) memory.delete(client);
+    else memory.set(client, kept);
   }
 }
 

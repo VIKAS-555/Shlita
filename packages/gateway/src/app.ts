@@ -16,6 +16,9 @@ import {
   simulationRequested,
 } from './access.js';
 import { OperatorSessionStore, sessionCookie } from './session.js';
+import { clientIdentity } from './client-address.js';
+import { writeLog } from './log.js';
+import crypto from 'node:crypto';
 
 export interface ProviderDefinition {
   id: string;
@@ -280,9 +283,44 @@ export function createGatewayApp(
   const maxJsonBytes = security.maxJsonBytes ?? 65_536;
   const sessions = security.sessions ?? new OperatorSessionStore();
   const secureCookies = security.secureCookies === true;
+  const trustedProxies = security.trustedProxies ?? [];
+  const publicOrigin = security.publicOrigin;
+  const lifecycle = security.lifecycle ?? { accepting: true };
+  const metrics = {
+    requests: 0,
+    failed: 0,
+    policyBlocks: 0,
+    lastDurationMs: 0,
+  };
 
-  function clientAddress(header: (name: string) => string | undefined): string {
-    return header('x-real-ip') || header('x-forwarded-for')?.split(',')[0]?.trim() || 'local';
+  function peerAddress(source: { header(name: string): string | undefined; env?: unknown }): string | undefined {
+    if (security.remoteAddress) return security.remoteAddress(source.header.bind(source));
+    const incoming = (source.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming;
+    return incoming?.socket?.remoteAddress;
+  }
+
+  function clientAddress(source: { header(name: string): string | undefined; env?: unknown }): string {
+    return clientIdentity({
+      remoteAddress: peerAddress(source),
+      forwardedFor: source.header('x-forwarded-for'),
+      realIp: source.header('x-real-ip'),
+      trustedProxies,
+    });
+  }
+
+  function originRejected(source: { header(name: string): string | undefined }): boolean {
+    const origin = source.header('origin');
+    if (!origin) return false;
+    let originHost = '';
+    try {
+      originHost = new URL(origin).host;
+    } catch {
+      return true;
+    }
+    const requestHost = source.header('host');
+    if (requestHost && originHost === requestHost) return false;
+    if (publicOrigin && origin === publicOrigin) return false;
+    return !corsOrigins.includes(origin);
   }
 
   function currentOperator(source: { header(name: string): string | undefined }) {
@@ -303,16 +341,34 @@ export function createGatewayApp(
   }
 
   app.use('*', async (c, next) => {
+    const started = Date.now();
+    const correlationId = c.req.header('x-request-id') || crypto.randomUUID();
+    c.header('x-shlita-correlation-id', correlationId);
     applyCors((name, value) => c.header(name, value), c.req.header('origin'), corsOrigins);
     if (c.req.method === 'OPTIONS') {
       return c.body(null, 204);
     }
     await next();
+    metrics.requests += 1;
+    metrics.lastDurationMs = Date.now() - started;
+    if (c.res.status >= 500) metrics.failed += 1;
+    if (c.res.headers.get('x-shlita-decision') === 'BLOCKED') metrics.policyBlocks += 1;
+    if (security.logger) {
+      writeLog(security.logger, {
+        level: c.res.status >= 500 ? 'error' : 'info',
+        event: 'request',
+        method: c.req.method,
+        path: new URL(c.req.url).pathname,
+        status: c.res.status,
+        durationMs: metrics.lastDurationMs,
+        correlationId,
+      });
+    }
   });
 
   // Health check endpoint for container and uptime monitoring
   app.post('/v1/session', async (c) => {
-    const client = clientAddress((name) => c.req.header(name));
+    const client = clientAddress({ header: (name) => c.req.header(name), env: c.env });
     if (sessions.limited(client)) {
       return c.json({ error: 'RATE_LIMITED', message: 'Too many sign-in attempts. Try again later.' }, 429);
     }
@@ -349,6 +405,10 @@ export function createGatewayApp(
     const operator = currentOperator(c.req);
     if (!operator.ok) return c.json({ authenticated: false }, 401);
     const session = operator.sessionId ? sessions.readCookie(c.req.header('cookie')) : null;
+    if (session) {
+      const maxAge = Math.max(0, Math.floor((session.expiresAt - Date.now()) / 1000));
+      c.header('Set-Cookie', sessionCookie(session.id, maxAge, secureCookies));
+    }
     return c.json({
       authenticated: true,
       organizationId: operator.ownerOrg,
@@ -377,6 +437,27 @@ export function createGatewayApp(
       registeredAgents: engine.getAllPolicies().length,
       timestamp: new Date().toISOString(),
     });
+  });
+
+  app.get('/ready', (c) => {
+    if (!lifecycle.accepting) return c.json({ status: 'shutting-down' }, 503);
+    if (!engine.storageReady()) return c.json({ status: 'storage-unavailable' }, 503);
+    return c.json({ status: 'ready' });
+  });
+
+  app.get('/metrics', (c) => {
+    const counts = engine.operationalCounts();
+    const lines = [
+      `shlita_requests_total ${metrics.requests}`,
+      `shlita_requests_failed_total ${metrics.failed}`,
+      `shlita_policy_blocks_total ${metrics.policyBlocks}`,
+      `shlita_last_request_duration_ms ${metrics.lastDurationMs}`,
+      `shlita_pending_reservations ${counts.pendingReservations}`,
+      `shlita_reconciliation_required ${counts.reconciliation}`,
+      `shlita_settlement_pending ${counts.settlementPending}`,
+      `shlita_database_ready ${engine.storageReady() ? 1 : 0}`,
+    ];
+    return c.text(lines.join('\n') + '\n');
   });
 
   // Real Proxy endpoint for AI Agent outbound requests
@@ -642,9 +723,18 @@ export function createGatewayApp(
     engine.recordPrivilegedAudit({ actor, agentId, action, decision, reason });
   }
 
-  function requireOwnedAgent(c: { req: { method: string; header(name: string): string | undefined; param(name: string): string } }, action: string) {
+  function requireOwnedAgent(c: { req: { method: string; header(name: string): string | undefined; param(name: string): string }; env?: unknown }, action: string) {
     const agentId = c.req.param('id');
     const operator = currentOperator(c.req);
+    const address = clientAddress({ header: (name) => c.req.header(name), env: c.env });
+    if (operator.ok && operator.via === 'session' && originRejected(c.req)) {
+      auditPrivileged(agentId, action, 'BLOCKED', `operator:${operator.ownerOrg}`, 'ORIGIN');
+      return {
+        ok: false as const,
+        status: 403 as const,
+        body: { error: 'ORIGIN', message: 'This origin is not allowed to use the operator session.' },
+      };
+    }
     if (operator.ok && csrfRejected(c.req, operator)) {
       auditPrivileged(agentId, action, 'BLOCKED', `operator:${operator.ownerOrg}`, 'CSRF');
       return {
@@ -673,6 +763,14 @@ export function createGatewayApp(
         body: { error: 'FORBIDDEN', message: 'Forbidden.' },
       };
     }
+    if (sessions.mutationLimited(address)) {
+      return {
+        ok: false as const,
+        status: 429 as const,
+        body: { error: 'RATE_LIMITED', message: 'Too many operator actions. Try again later.' },
+      };
+    }
+    sessions.recordMutation(address);
     return { ok: true as const, agentId, ownerOrg: operator.ownerOrg };
   }
 
@@ -735,9 +833,17 @@ export function createGatewayApp(
         operator.status
       );
     }
+    if (operator.ok && operator.via === 'session' && originRejected(c.req)) {
+      return c.json({ error: 'ORIGIN', message: 'This origin is not allowed to use the operator session.' }, 403);
+    }
     if (csrfRejected(c.req, operator)) {
       return c.json({ error: 'CSRF', message: 'A matching CSRF token is required.' }, 403);
     }
+    const address = clientAddress({ header: (name) => c.req.header(name), env: c.env });
+    if (sessions.mutationLimited(address)) {
+      return c.json({ error: 'RATE_LIMITED', message: 'Too many operator actions. Try again later.' }, 429);
+    }
+    sessions.recordMutation(address);
     const parsed = await readJsonObject(c.req.raw, maxJsonBytes);
     if (!parsed.ok) return c.json(parsed.body, parsed.status);
     const agentId = typeof parsed.value.agentId === 'string' ? parsed.value.agentId.trim() : '';
@@ -901,9 +1007,17 @@ export function createGatewayApp(
         operator.status
       );
     }
+    if (operator.ok && operator.via === 'session' && originRejected(c.req)) {
+      return c.json({ error: 'ORIGIN', message: 'This origin is not allowed to use the operator session.', fundsMoved: false }, 403);
+    }
     if (csrfRejected(c.req, operator)) {
       return c.json({ error: 'CSRF', message: 'A matching CSRF token is required.', fundsMoved: false }, 403);
     }
+    const address = clientAddress({ header: (name) => c.req.header(name), env: c.env });
+    if (sessions.mutationLimited(address)) {
+      return c.json({ error: 'RATE_LIMITED', message: 'Too many operator actions. Try again later.', fundsMoved: false }, 429);
+    }
+    sessions.recordMutation(address);
     if (security.settlementEnabled !== true || !security.settlementDestination) {
       return c.json({ error: 'SETTLEMENT_DISABLED', message: 'Settlement is disabled.', fundsMoved: false }, 403);
     }

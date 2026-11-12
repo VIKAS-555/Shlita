@@ -6,12 +6,14 @@ import { createPolicyEngine, PolicyEngine, SpendingPolicy } from '../../core/src
 import { SolanaSettlementManager } from '../../solana/src/settlement.js';
 import { createGatewayApp } from './app.js';
 import { assessSecurityConfig, SecurityConfig } from './security-config.js';
+import { OperatorSessionStore } from './session.js';
 
 export interface BootSuccess {
   ok: true;
   app: ReturnType<typeof createGatewayApp>;
   engine: PolicyEngine;
   config: SecurityConfig;
+  lifecycle: { accepting: boolean };
 }
 
 export interface BootFailure {
@@ -51,7 +53,25 @@ export function bootFromEnv(env: Record<string, string | undefined>): BootSucces
   }
 
   const dbPath = config.dbPath || path.resolve(process.cwd(), config.stateDir, 'ledger.db');
-  const engine = createPolicyEngine(dbPath);
+  if (config.locked) {
+    const directory = path.dirname(path.resolve(dbPath));
+    try {
+      fs.mkdirSync(directory, { recursive: true });
+      fs.accessSync(directory, fs.constants.W_OK);
+    } catch {
+      return { ok: false, errors: ['Ledger directory is not writable.'] };
+    }
+  }
+  let engine: PolicyEngine;
+  try {
+    engine = createPolicyEngine(dbPath, { requirePersistent: config.locked });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Ledger storage is not available.';
+    return { ok: false, errors: [message] };
+  }
+  if (!engine.storageReady()) {
+    return { ok: false, errors: ['Ledger storage is not readable.'] };
+  }
   engine.recoverInFlightOperations();
   if (config.seedDemo) {
     enrollDemoAgents(engine, config);
@@ -77,16 +97,29 @@ export function bootFromEnv(env: Record<string, string | undefined>): BootSucces
     settlementMint
   );
 
+  const lifecycle = { accepting: true };
+  const sessions = new OperatorSessionStore({
+    rateStore: {
+      count: (kind, client, since) => engine.countAttempts(kind, client, since),
+      add: (kind, client, at) => engine.recordAttempt(kind, client, at),
+      clear: (kind, client) => engine.clearAttempts(kind, client),
+    },
+  });
   const app = createGatewayApp(engine, settlementManager, {
     operators: [{ key: config.operatorKey, ownerOrg: config.operatorOrg }],
     allowSimulation: config.allowSimulation,
     corsOrigins: config.corsOrigins,
-    secureCookies: config.production,
+    secureCookies: config.secureCookies,
+    trustedProxies: config.trustedProxies,
+    publicOrigin: config.publicOrigin,
+    sessions,
+    lifecycle,
+    logger: (line) => console.log(line),
     settlementEnabled: env.SHLITA_SETTLEMENT_ENABLED === 'true',
     settlementDestination: env.SHLITA_SETTLEMENT_DESTINATION,
   });
 
-  return { ok: true, app, engine, config: { ...config, dbPath } };
+  return { ok: true, app, engine, config: { ...config, dbPath }, lifecycle };
 }
 
 function enrollDemoAgents(engine: PolicyEngine, config: SecurityConfig): void {

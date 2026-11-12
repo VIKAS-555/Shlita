@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-ui
+.git
+.shlita
+.env
+coverage
+*.db
+agent-transcripts

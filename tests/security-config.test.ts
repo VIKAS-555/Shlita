@@ -44,21 +44,54 @@ describe('production security configuration', () => {
         SHLITA_CORS_ORIGINS: '*',
       }).ok
     ).toBe(false);
+    expect(
+      assessSecurityConfig({
+        SHLITA_ENV: 'production',
+        SHLITA_OPERATOR_KEY: STRONG,
+        SHLITA_OPERATOR_ORG: 'org-example',
+        SHLITA_CORS_ORIGINS: 'https://shlita.example',
+      }).ok
+    ).toBe(false);
+    expect(
+      assessSecurityConfig({
+        SHLITA_ENV: 'production',
+        SHLITA_OPERATOR_KEY: STRONG,
+        SHLITA_OPERATOR_ORG: 'org-example',
+        SHLITA_CORS_ORIGINS: 'https://shlita.example',
+        SHLITA_DB_PATH: ':memory:',
+      }).ok
+    ).toBe(false);
+    expect(
+      assessSecurityConfig({
+        SHLITA_ENV: 'staging',
+        SHLITA_OPERATOR_KEY: STRONG,
+        SHLITA_OPERATOR_ORG: 'org-example',
+        SHLITA_DB_PATH: '/var/lib/shlita/ledger.db',
+        SHLITA_ALLOW_SIMULATION: 'true',
+      }).ok
+    ).toBe(false);
+    expect(assessSecurityConfig({ SHLITA_ENV: 'mystery' }).ok).toBe(false);
   });
 
   it('accepts a strong production configuration with simulation and demo enrollment off', () => {
     const result = assessSecurityConfig({
       SHLITA_ENV: 'production',
       SHLITA_OPERATOR_KEY: STRONG,
-      SHLITA_OPERATOR_ORG: 'org-example',
-      SHLITA_CORS_ORIGINS: 'https://shlita.example',
-    });
+        SHLITA_OPERATOR_ORG: 'org-example',
+        SHLITA_CORS_ORIGINS: 'https://shlita.example',
+        SHLITA_DB_PATH: '/var/lib/shlita/ledger.db',
+        SHLITA_PUBLIC_ORIGIN: 'https://shlita.example',
+        SHLITA_TRUSTED_PROXIES: '10.0.0.5',
+      });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.config.allowSimulation).toBe(false);
     expect(result.config.seedDemo).toBe(false);
     expect(result.config.corsOrigins).toEqual(['https://shlita.example']);
     expect(result.config.generateOperatorKey).toBe(false);
+    expect(result.config.dbPath).toBe('/var/lib/shlita/ledger.db');
+    expect(result.config.trustedProxies).toEqual(['10.0.0.5']);
+    expect(result.config.secureCookies).toBe(true);
   });
 
   it('accepts an explicit local demo configuration', () => {

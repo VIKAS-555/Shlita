@@ -240,6 +240,117 @@ export class SqliteLedger {
         FOREIGN KEY (operation_id) REFERENCES financial_operations(id)
       );
     `);
+    this.applyMigrations();
+  }
+
+  private applyMigrations(): void {
+    if (!this.db) return;
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      );
+    `);
+    let version = this.schemaVersion();
+    if (version < 1) {
+      this.markMigration(1);
+      version = 1;
+    }
+    if (version < 2) {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS login_attempts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          kind TEXT NOT NULL,
+          client TEXT NOT NULL,
+          attempted_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_login_attempts_lookup
+          ON login_attempts(kind, client, attempted_at);
+      `);
+      this.markMigration(2);
+    }
+  }
+
+  private markMigration(version: number): void {
+    this.db!.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(version, Date.now());
+  }
+
+  schemaVersion(): number {
+    if (!this.db) return 0;
+    const row = this.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as {
+      version: number | null;
+    };
+    return row?.version ?? 0;
+  }
+
+  storageReady(): boolean {
+    if (!this.db) return false;
+    try {
+      this.db.prepare('SELECT 1 AS ok').get();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  recordAttempt(kind: string, client: string, at: number): void {
+    if (!this.db) return;
+    this.db
+      .prepare('INSERT INTO login_attempts (kind, client, attempted_at) VALUES (?, ?, ?)')
+      .run(kind, client.slice(0, 200), at);
+  }
+
+  countAttempts(kind: string, client: string, since: number): number {
+    if (!this.db) return 0;
+    const row = this.db
+      .prepare(
+        'SELECT COUNT(*) AS n FROM login_attempts WHERE kind = ? AND client = ? AND attempted_at >= ?'
+      )
+      .get(kind, client.slice(0, 200), since) as { n: number };
+    return Number(row?.n ?? 0);
+  }
+
+  clearAttempts(kind: string, client: string): void {
+    if (!this.db) return;
+    this.db.prepare('DELETE FROM login_attempts WHERE kind = ? AND client = ?').run(kind, client.slice(0, 200));
+  }
+
+  operationalCounts(): { pendingReservations: number; reconciliation: number; settlementPending: number } {
+    if (!this.db) return { pendingReservations: 0, reconciliation: 0, settlementPending: 0 };
+    const pending = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM reservations WHERE status = 'PENDING'`)
+      .get() as { n: number };
+    const reconciliation = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM financial_operations WHERE state = 'RECONCILIATION_REQUIRED'`)
+      .get() as { n: number };
+    const settlementPending = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM financial_operations WHERE state IN ('SETTLEMENT_SUBMITTED', 'SETTLEMENT_CONFIRMATION_PENDING', 'SETTLEMENT_OUTCOME_UNKNOWN')`
+      )
+      .get() as { n: number };
+    return {
+      pendingReservations: Number(pending?.n ?? 0),
+      reconciliation: Number(reconciliation?.n ?? 0),
+      settlementPending: Number(settlementPending?.n ?? 0),
+    };
+  }
+
+  async backupTo(dest: string): Promise<void> {
+    if (!this.db) throw new Error('Persistent ledger is required for backup.');
+    const directory = path.dirname(dest);
+    fs.mkdirSync(directory, { recursive: true });
+    const sqlite = require('node:sqlite') as {
+      backup: (source: DatabaseSync, destination: string) => Promise<number>;
+    };
+    await sqlite.backup(this.db, dest);
+    fs.chmodSync(dest, 0o600);
+    const check = new NodeDatabaseSync(dest, { readOnly: true });
+    try {
+      const row = check.prepare('PRAGMA integrity_check').get() as { integrity_check: string };
+      if (row.integrity_check !== 'ok') throw new Error('Backup failed integrity check.');
+    } finally {
+      check.close();
+    }
   }
 
   private ensureAgentCredentialColumns(): void {

@@ -152,6 +152,8 @@ npm start
 ```
 Open [http://127.0.0.1:4000](http://127.0.0.1:4000). The default screen asks for the operator key. Add `?demo=1` for the labeled sample dashboard. The sample balances are not ledger records.
 
+A single container with a persistent volume is the supported deployment. It is not a multi-instance service. See `docs/adr/0001-single-instance-sqlite.md`, `Dockerfile`, and `compose.yaml`. Production and staging require `SHLITA_DB_PATH` to be a real file. `npm run backup` writes a SQLite backup, and `npm run restore -- <backup> <destination>` refuses to replace an existing file unless `SHLITA_RESTORE_OVERWRITE=true`. Vercel and GitHub Pages still serve only the static interface.
+
 Development startup without `SHLITA_OPERATOR_KEY` generates a local operator key under `.shlita/` and does not print it. Production (`SHLITA_ENV=production`) refuses to start unless `.env.example` is copied to `.env` and the placeholders are replaced with strong values. Demo agent enrollment runs only when `SHLITA_SEED_DEMO=true` outside production. Simulation runs only when `SHLITA_ALLOW_SIMULATION=true` outside production.
 
 ---
