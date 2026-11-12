@@ -22,14 +22,24 @@ const REJECTED_CREDENTIALS = new Set([
   'admin',
 ]);
 
+const KNOWN_MODES = new Set(['development', 'test', 'staging', 'production']);
+
 export interface SecurityConfig {
   production: boolean;
+  mode: 'development' | 'test' | 'staging' | 'production';
+  locked: boolean;
   operatorKey: string;
   operatorOrg: string;
   generateOperatorKey: boolean;
   allowSimulation: boolean;
   seedDemo: boolean;
   corsOrigins: string[];
+  trustedProxies: string[];
+  publicOrigin?: string;
+  secureCookies: boolean;
+  logLevel: string;
+  backupDir?: string;
+  backupRetention: number;
   dbPath?: string;
   stateDir: string;
   port: number;
@@ -45,8 +55,12 @@ export function assessSecurityConfig(
   env: Record<string, string | undefined>
 ): SecurityAssessment {
   const mode = (env.SHLITA_ENV || env.NODE_ENV || 'development').toLowerCase();
-  const production = mode === 'production';
   const errors: string[] = [];
+  if (!KNOWN_MODES.has(mode)) {
+    return { ok: false, errors: [`SHLITA_ENV must be development, test, staging, or production.`] };
+  }
+  const production = mode === 'production';
+  const locked = mode === 'production' || mode === 'staging';
 
   const operatorKey = env.SHLITA_OPERATOR_KEY?.trim() ?? '';
   const operatorOrg = env.SHLITA_OPERATOR_ORG?.trim() ?? '';
@@ -58,6 +72,17 @@ export function assessSecurityConfig(
     .filter(Boolean);
   const demoKeyResearcher = env.SHLITA_DEMO_KEY_RESEARCHER?.trim() || undefined;
   const demoKeyArbitrage = env.SHLITA_DEMO_KEY_ARBITRAGE?.trim() || undefined;
+  const dbPath = env.SHLITA_DB_PATH?.trim() || undefined;
+  const trustedProxies = (env.SHLITA_TRUSTED_PROXIES ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const publicOrigin = env.SHLITA_PUBLIC_ORIGIN?.trim() || undefined;
+  const backupDir = env.SHLITA_BACKUP_DIR?.trim() || undefined;
+  const retentionText = env.SHLITA_BACKUP_RETENTION?.trim();
+  const backupRetention = retentionText ? Number(retentionText) : 14;
+  const portText = env.PORT?.trim();
+  const port = portText ? Number(portText) : 4000;
 
   if (corsOrigins.includes('*')) {
     errors.push('Wildcard CORS origins are not permitted.');
@@ -75,11 +100,22 @@ export function assessSecurityConfig(
     }
   }
 
-  if (production) {
+  if (locked) {
     if (!operatorKey) errors.push('SHLITA_OPERATOR_KEY is required in production.');
     if (!operatorOrg) errors.push('SHLITA_OPERATOR_ORG is required in production.');
     if (allowSimulation) errors.push('Simulation cannot be enabled in production.');
     if (seedDemo) errors.push('Demo enrollment cannot run in production.');
+    if (!dbPath || dbPath === ':memory:') errors.push('SHLITA_DB_PATH must be a persistent file in production.');
+    if (!Number.isInteger(port) || port < 1 || port > 65535) errors.push('PORT must be an integer from 1 to 65535.');
+    if (publicOrigin && !publicOrigin.startsWith('https://')) {
+      errors.push('SHLITA_PUBLIC_ORIGIN must use HTTPS in production.');
+    }
+    if (trustedProxies.some((proxy) => proxy === 'local' || proxy === '*')) {
+      errors.push('SHLITA_TRUSTED_PROXIES cannot include local or a wildcard in production.');
+    }
+    if (!Number.isInteger(backupRetention) || backupRetention < 1 || backupRetention > 365) {
+      errors.push('SHLITA_BACKUP_RETENTION must be an integer from 1 to 365.');
+    }
   } else if (operatorKey && !operatorOrg) {
     errors.push('SHLITA_OPERATOR_ORG is required when SHLITA_OPERATOR_KEY is set.');
   }
@@ -93,15 +129,23 @@ export function assessSecurityConfig(
     ok: true,
     config: {
       production,
+      mode: mode as SecurityConfig['mode'],
+      locked,
       operatorKey,
       operatorOrg: operatorOrg || 'org-local',
-      generateOperatorKey: !production && !operatorKey,
-      allowSimulation: production ? false : allowSimulation,
-      seedDemo: production ? false : seedDemo,
-      corsOrigins: production ? corsOrigins : devOrigins,
-      dbPath: env.SHLITA_DB_PATH?.trim() || undefined,
+      generateOperatorKey: !locked && !operatorKey,
+      allowSimulation: locked ? false : allowSimulation,
+      seedDemo: locked ? false : seedDemo,
+      corsOrigins: locked ? corsOrigins : devOrigins,
+      trustedProxies,
+      publicOrigin,
+      secureCookies: locked,
+      logLevel: env.SHLITA_LOG_LEVEL?.trim() || 'info',
+      backupDir,
+      backupRetention: Number.isInteger(backupRetention) ? backupRetention : 14,
+      dbPath,
       stateDir: env.SHLITA_STATE_DIR?.trim() || '.shlita',
-      port: Number(env.PORT) || 4000,
+      port: Number.isInteger(port) && port > 0 ? port : 4000,
       demoKeyResearcher,
       demoKeyArbitrage,
     },

@@ -25,11 +25,35 @@ if (isDirectExecution()) {
     process.exit(1);
   }
 
-  const { app, config } = booted;
-  serve({ fetch: app.fetch, port: config.port }, () => {
+  const { app, config, engine, lifecycle } = booted;
+  const server = serve({ fetch: app.fetch, port: config.port }, () => {
     console.log(`Shlita gateway listening on http://localhost:${config.port}`);
     console.log(`Ledger: ${config.dbPath}`);
     console.log(`Simulation: ${config.allowSimulation ? 'enabled' : 'disabled'}`);
     console.log(`Demo enrollment: ${config.seedDemo ? 'enabled' : 'disabled'}`);
   });
+
+  let stopping = false;
+  const shutdown = () => {
+    if (stopping) return;
+    stopping = true;
+    lifecycle.accepting = false;
+    const finish = () => {
+      try {
+        engine.close();
+      } catch {
+        // The ledger may already be closed.
+      }
+      process.exit(0);
+    };
+    const timer = setTimeout(finish, 2000);
+    const closer = server as { close(callback?: () => void): void; closeAllConnections?: () => void };
+    closer.close(() => {
+      clearTimeout(timer);
+      finish();
+    });
+    closer.closeAllConnections?.();
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }

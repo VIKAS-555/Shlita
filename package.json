@@ -12,6 +12,8 @@
     "start": "node --import tsx packages/gateway/src/index.ts",
     "test": "vitest run",
     "test:solana-local": "tsx scripts/solana-local-settlement.ts",
+    "backup": "tsx packages/gateway/src/backup-cli.ts",
+    "restore": "tsx packages/gateway/src/restore-cli.ts",
     "test:watch": "vitest",
     "demo": "tsx demo/run-demo.ts"
   },
