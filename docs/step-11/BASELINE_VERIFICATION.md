@@ -56,37 +56,43 @@ All 5 most recent runs show **✓ passed**:
 
 ---
 
-## Test Suite — Reproduced Results
+## Test Suite — Baseline vs. Step 11 PR Results
 
-**Command:** `npm ci && npm test`  
-**Exit code:** 0  
-**Result:** ✅ ALL PASS
+### Initial Main Baseline (`3628850`)
+- **Command:** `npm test`
+- **Result:** ✅ 98 passed (15 test files)
+- **Duration:** ~3.27 s
 
-| Metric | Value |
-|---|---|
-| Test files | 15 passed |
-| Total tests | **98 passed** |
-| Duration | ~3.27 s |
-| Failures | None |
-| Skipped | None |
+### Step 11 PR Suite (PR #12)
+- **Command:** `npm test`
+- **Result:** ✅ **106 passed (16 test files)** — added `tests/step-11/regression.test.ts` (8 tests)
+- **Duration:** ~2.62 s
+- **CI Run:** GitHub Actions Run 43369351083 (Commit `a1c807a`) — PASS (Green ✓)
 
-### Test Files
+### Dashboard Browser Suite (PR #12)
+- **Command:** `npm run test:browser` (`playwright test`)
+- **Result:** ✅ **1 passed (1 test, Chromium headless)** — `tests/step-11/dashboard.browser.test.ts`
+- **Duration:** ~3.5 s
+- **Scope Verified:** Operator sign-in, agent enrollment, simulated proxy dispatch, live event & spend update without reload, freeze persistence across reload, sign-out.
+
+### Test Files (16 files, 106 tests total)
 ```
-tests/client-address.test.ts       (2 tests)
-tests/core.test.ts                 (12 tests)
-tests/gateway.test.ts              (8 tests)
-tests/ledger.integrity.test.ts     (17 tests)
-tests/openapi.contract.test.ts     (2 tests)
-tests/operations.reliability.test.ts (6 tests)
-tests/operator-session.test.ts     (6 tests)
-tests/sdk.client.test.ts           (6 tests)
-tests/sdk.consumer.test.ts         (1 test)   — packs SDK, installs from tarball
-tests/sdk.gateway.test.ts          (1 test)
-tests/security-config.test.ts      (3 tests)
-tests/security.startup.test.ts     (2 tests)  — process-level startup tests
-tests/security.test.ts             (21 tests)
-tests/settlement.ledger.test.ts    (2 tests)
-tests/solana.test.ts               (9 tests)
+tests/client-address.test.ts          (2 tests)
+tests/core.test.ts                    (12 tests)
+tests/gateway.test.ts                 (8 tests)
+tests/ledger.integrity.test.ts        (17 tests)
+tests/openapi.contract.test.ts        (2 tests)
+tests/operations.reliability.test.ts  (6 tests)
+tests/operator-session.test.ts        (6 tests)
+tests/sdk.client.test.ts              (6 tests)
+tests/sdk.consumer.test.ts            (1 test)   — packs SDK, installs from tarball
+tests/sdk.gateway.test.ts             (1 test)
+tests/security-config.test.ts         (3 tests)
+tests/security.startup.test.ts        (2 tests)  — process-level startup tests
+tests/security.test.ts                (21 tests)
+tests/settlement.ledger.test.ts       (2 tests)
+tests/solana.test.ts                  (9 tests)
+tests/step-11/regression.test.ts      (8 tests)  — added in Step 11
 ```
 
 ---

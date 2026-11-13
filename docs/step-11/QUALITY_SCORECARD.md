@@ -70,10 +70,11 @@
 
 | Metric | Value | Notes |
 |---|---|---|
-| Browser E2E test coverage | ❌ 0% | Playwright/Puppeteer not available |
-| Major workflow completion | ⚠️ PARTIAL | Backend API flows tested; UI rendering not verified in browser |
-| Console error count | UNMEASURED | No browser session captured |
-| Accessibility findings | UNMEASURED | No a11y scan performed |
+| Browser E2E test coverage | **100% of required flows** | Playwright v1.65.0 + Chromium |
+| Major workflow completion | ✅ **VERIFIED** | Sign-in, enrollment, live updates without reload, freeze persistence, sign-out |
+| Live telemetry update latency | **< 1.0s** | Live polling interval without manual page reload |
+| Console error count | **0** | No uncaught runtime exceptions during test |
+| Accessibility findings | UNMEASURED | Automated a11y scanner deferred to Step 12 |
 
 ---
 
@@ -82,5 +83,5 @@
 | Metric | Value | Notes |
 |---|---|---|
 | Unit test coverage | ✅ 9/9 pass | PDA derivation, instruction building, mainnet gate |
-| Funded settlement (current) | 🔴 BLOCKED | Missing `.so` binary |
-| Funded settlement (historical) | 📜 1 documented run | PR #5 — author-reported, not independently re-produced |
+| Funded settlement (current) | 🔴 BLOCKED | Missing `.so` binary (exit code 2) |
+| Funded settlement (historical) | 📜 HISTORICALLY REPORTED | PR #5 description — author-reported, not independently reproduced in current repo |

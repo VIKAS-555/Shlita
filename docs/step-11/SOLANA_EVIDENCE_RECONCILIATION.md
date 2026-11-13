@@ -7,23 +7,25 @@
 
 ## Purpose
 
-Steps 9 and 10 gave conflicting or ambiguous accounts of Solana funded settlement execution. This document traces every claim to its evidence, classifies it, and reports the current reproduction status.
+Steps 9 and 10 gave ambiguous accounts of Solana funded settlement execution. In particular, the Step 9 staging report stated that "Solana funded execution is verified through CI evidence only", whereas the CI workflow (`.github/workflows/deploy.yml`) explicitly prints:
+`Funded local-validator settlement: BLOCKED. npm test did not move tokens.` (exit code 2).
+
+This document traces every claim to its primary source, reconciles the discrepancies, labels the historical evidence accurately, and reports the current reproduction status.
 
 ---
 
 ## 1. Historical PR Evidence
 
 ### PR #4 — `fix(solana): settle once through transfer_fixed`
-- **Commit:** `8066295`  
-- **Merged into:** `f7c752e` (merge commit)  
-- **Claim:** Settlement builder added with `transfer_fixed` instruction.  
-- **Evidence:** Code change merged. No funded local execution claimed in this PR.  
-- **Classification:** **NOT VERIFIED** (code shipped, funded test not performed in PR #4).
+- **Commit:** `8066295` (Merge commit `f7c752e`)
+- **Claim:** Settlement builder added with `transfer_fixed` instruction.
+- **Evidence:** Code change merged. No funded local execution claimed in this PR.
+- **Classification:** **NOT VERIFIED** (code merged; funded test not performed in PR #4).
 
 ### PR #5 — `fix(solana): prove one local transfer_fixed settlement`
-- **Commit:** `e478d9a8ad1f6d19a926372810abe4a825b63730`  
-- **Date:** 2026-11-12T03:34:45+0530  
-- **Author:** `XiaoArnav <322868724+XiaoArnav@users.noreply.github.com>`  
+- **Commit:** `e478d9a8ad1f6d19a926372810abe4a825b63730`
+- **Date:** 2026-11-12T03:34:45+0530
+- **Author:** `XiaoArnav <322868724+XiaoArnav@users.noreply.github.com>`
 - **Claim from PR description:**
   - `npm run test:solana-local` loaded `subscriptions_program.so` from program-v0.5.0 (`364a41976c33347d092902443bbec2def9227e75`) with `solana-test-validator`
   - Created 6-decimal test mint
@@ -35,78 +37,84 @@ Steps 9 and 10 gave conflicting or ambiguous accounts of Solana funded settlemen
   - Retry of same operation returned original signature (idempotent, no second transfer)
   - `npm test`: 74 passed
   - CI on this commit: **BLOCKED** (binary not installed on GitHub Actions runner)
-- **Classification:** **HISTORICALLY VERIFIED** — the developer ran this locally and recorded the outcome in the PR description. No CI artifact or transaction log is independently retrievable from this repository. The claim is internally consistent and the script (`scripts/solana-local-settlement.ts`) implements the described behavior.
+- **Classification:** **HISTORICALLY REPORTED** — The PR #5 description is the sole record of this run. No transaction signature artifact, on-chain log, or persistent ledger dump was preserved in the git tree. The TypeScript script (`scripts/solana-local-settlement.ts`) exists and implements the exact assertions described.
 
 ---
 
-## 2. Steps 9 & 10 Audit Reports
+## 2. Reconciliation with Step 9 Staging Report
 
-### Step 10 `SOLANA_VERIFICATION.md` (found at `docs/step-10/SOLANA_VERIFICATION.md`)
-- **Status given:** `PARTIAL / CONDITIONAL PASS`  
-- **Finding:** Unit tests (9/9) pass. Funded local-validator test blocked on `subscriptions_program.so` binary.  
-- **Cryptographic verification:** PDA derivations and instruction construction verified by unit tests.  
-- **Classification of their funded claim:** **CURRENTLY BLOCKED** — Step 10 attempted `npm run test:solana-local` and received exit code 2.
+The Step 9 Staging Report (`docs/step-9/STAGING_VERIFICATION.md`) summarized:
+> *"Solana funded execution is verified through CI evidence only"*
+
+**Correction & Fact-Check:**
+Inspection of GitHub Actions workflow `.github/workflows/deploy.yml` and actual CI run logs reveals:
+```bash
+set +e
+npm run test:solana-local
+status=$?
+set -e
+if [ "$status" -eq 0 ]; then
+  echo "Funded local-validator settlement executed."
+elif [ "$status" -eq 2 ]; then
+  echo "Funded local-validator settlement: BLOCKED. npm test did not move tokens."
+else
+  exit "$status"
+fi
+```
+In all CI runs from PR #5 up to PR #11, `npm run test:solana-local` exited with status `2` on the GitHub Actions runner because the BPF binary was not present. CI recorded this as **BLOCKED**, not as verified funded settlement.
+
+Therefore, the claim that CI verified funded token movement was a wording error in Step 9. CI verified only that the script fails closed with exit code 2 when the binary is absent.
 
 ---
 
 ## 3. Current Reproduction Attempt (Step 11)
 
-**Command:** `npm run test:solana-local`  
-**Result:** 🔴 **CURRENTLY BLOCKED**
+### A. Unit-Level Cryptographic Logic (Separate from Funded Execution)
+- **Command:** `npx vitest run tests/solana.test.ts`
+- **Result:** ✅ **9 of 9 passed (59ms)**
+- **Verified Invariants:**
+  - Derives canonical Subscription Authority PDA with correct seeds
+  - Derives official Fixed Delegation PDA with nonce
+  - Derives official Event Authority PDA
+  - Builds cryptographically valid `transfer_fixed` instruction
+  - Enforces positive integer micro-USDC transfer amounts
+  - Rejects mainnet settlement when `SHLITA_ALLOW_MAINNET` is unset
+  - Honestly distinguishes simulated from broadcast transactions
+  - Formats micro-USDC decimal representation accurately
+  - Verifies observed token balance deltas match transfer amount
+- **Classification:** **CURRENTLY REPRODUCED**
 
-```
-BLOCKED: SHLITA_SUBSCRIPTIONS_SO is not a subscriptions_program.so built from
-program-v0.5.0 (364a41976c33347d092902443bbec2def9227e75). The local validator
-was not asked to move tokens.
-```
-
-**Compiled `.so` binary search:** `find . -name "*.so"` — **no `.so` file found in the repository**.
-
-**Unit-level Solana tests (safe, no binary):**  
-Command: `npx vitest run tests/solana.test.ts`  
-Result: ✅ **9/9 tests passed**
-
-Tests confirmed passing:
-- Derives canonical Subscription Authority PDA with correct seeds
-- Derives official Fixed Delegation PDA with nonce
-- Derives official Event Authority PDA
-- Builds cryptographically valid `transfer_fixed` instruction
-- Enforces positive integer micro-USDC transfer amounts
-- Rejects mainnet settlement when `SHLITA_ALLOW_MAINNET` is unset
-- Honestly distinguishes simulated from broadcast transactions
-- Formats micro-USDC decimal representation accurately
-- Verifies observed token balance deltas match transfer amount
-
----
-
-## 4. Classification Summary
-
-| Claim | Classification | Evidence |
-|---|---|---|
-| Settlement builder builds valid `transfer_fixed` instruction | ✅ CURRENTLY REPRODUCED | Unit tests (solana.test.ts, 9/9 pass) |
-| PDA derivations (authority, delegation, event) match spec | ✅ CURRENTLY REPRODUCED | Unit tests |
-| Mainnet gate blocks without `SHLITA_ALLOW_MAINNET=true` | ✅ CURRENTLY REPRODUCED | Unit test + source code review |
-| Funded local transfer: 1,000,000 → 990,000 source balance | 📜 HISTORICALLY VERIFIED | PR #5 description; not independently re-producible without `.so` binary |
-| Idempotent replay of funded settlement (same signature) | 📜 HISTORICALLY VERIFIED | PR #5 description |
-| CI-level funded execution on GitHub Actions | 🔴 CURRENTLY BLOCKED | CI intentionally records exit 2 as BLOCKED |
-| `subscriptions_program.so` binary in repository | ❌ NOT PRESENT | `find . -name "*.so"` returns nothing |
+### B. Funded Local-Validator Execution
+- **Command:** `npm run test:solana-local`
+- **Exit Code:** 2
+- **Diagnostic Message:**
+  ```text
+  BLOCKED: SHLITA_SUBSCRIPTIONS_SO is not a subscriptions_program.so built from
+  program-v0.5.0 (364a41976c33347d092902443bbec2def9227e75). The local validator
+  was not asked to move tokens.
+  ```
+- **Prerequisite Check:** Search for `*.so` files in repository yields 0 results.
+- **Classification:** 🔴 **CURRENTLY BLOCKED**
 
 ---
 
-## 5. What Would Be Required to Reproduce
+## 4. Reconciled Classification Register
 
-To move the funded settlement from HISTORICALLY VERIFIED to CURRENTLY REPRODUCED:
-
-1. Obtain the compiled `subscriptions_program.so` BPF binary built from program-v0.5.0 commit `364a41976c33347d092902443bbec2def9227e75`.
-2. Set the environment variable: `SHLITA_SUBSCRIPTIONS_SO=/path/to/subscriptions_program.so`
-3. Install `solana-test-validator` and `solana` CLI on the host.
-4. Run: `npm run test:solana-local`
-5. Record the transaction signature and balance delta outputs.
+| Claim | Source | Status / Classification | Evidence |
+|---|---|---|---|
+| Valid instruction generation & PDA math | `settlement.ts`, `solana.test.ts` | ✅ **CURRENTLY REPRODUCED** | 9 unit tests pass (59ms) |
+| Fail-closed mainnet protection gate | `settlement.ts`, `solana.test.ts` | ✅ **CURRENTLY REPRODUCED** | Unit test throws without env |
+| Funded local transfer (1,000,000 → 990,000) | PR #5 description | 📜 **HISTORICALLY REPORTED** | Author-reported in PR #5; no binary in repo |
+| Replay protection returning same signature | PR #5 description | 📜 **HISTORICALLY REPORTED** | Author-reported in PR #5 |
+| CI runner verification of token movement | Step 9 report | ❌ **CONTRADICTED** | CI explicitly logs BLOCKED (exit 2) |
+| Current funded local execution | Step 11 execution | 🔴 **CURRENTLY BLOCKED** | Exits 2; missing `.so` binary |
 
 ---
 
-## 6. Conclusion
+## 5. Requirements for Complete Reproduction in Future Steps
 
-The historical funded settlement claim from PR #5 is **internally consistent** with the current code in `scripts/solana-local-settlement.ts` and `packages/solana/src/settlement.ts`. The script's logic is unchanged from PR #5. The cryptographic components (instruction building, PDA derivation, fail-closed mainnet gate) are independently verified by the unit test suite.
-
-The gap between HISTORICALLY VERIFIED and CURRENTLY REPRODUCED is **solely** the missing compiled BPF binary, not a software defect.
+To execute the funded settlement in CI or locally in Step 12+:
+1. Build `subscriptions_program.so` from Solana Foundation Subscriptions repo commit `364a41976c33347d092902443bbec2def9227e75`.
+2. Stage the binary in CI or supply via `SHLITA_SUBSCRIPTIONS_SO`.
+3. Provide `solana-test-validator` in the CI image.
+4. Execute `npm run test:solana-local` and capture on-chain transaction signature and delta balance output.

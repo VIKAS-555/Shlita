@@ -6,6 +6,8 @@ dist/
 dist-ui/
 coverage/
 .turbo/
+test-results/
+playwright-report/
 
 # Environment files & secret configurations
 .env
