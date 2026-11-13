@@ -88,23 +88,30 @@ flowchart TD
 - **Process User:** Non-root `USER node` (UID 1000).
 
 ### B. Ingress, Domain & TLS
-- **Public FQDN:** `gateway.pilot.shlita.xyz` (or designated pilot domain).
-- **TLS Ingress:** Caddy 2 reverse proxy running natively or via companion container:
+- **Public FQDN:** `gateway.staging.shlita.xyz` (pilot staging domain; requires cloud VM & public DNS delegation).
+- **TLS Ingress:** Caddy 2 reverse proxy running as edge TLS companion service (`compose.staging.yaml`):
   ```caddy
-  gateway.pilot.shlita.xyz {
+  {$SHLITA_STAGING_DOMAIN:gateway.staging.shlita.xyz} {
       encode zstd gzip
       request_body {
           max_size 5mb
       }
-      reverse_proxy 127.0.0.1:4010 {
-          header_up Host {host}
-          header_up X-Real-IP {remote_host}
-          header_up X-Forwarded-For {remote_host}
-          header_up X-Forwarded-Proto {scheme}
+      @public_probe path /health /ready /metrics
+      handle @public_probe {
+          reverse_proxy gateway:4000
+      }
+      handle {
+          reverse_proxy gateway:4000 {
+              header_up Host {host}
+              header_up X-Real-IP {remote_host}
+              header_up X-Forwarded-For {remote_host}
+              header_up X-Forwarded-Proto {scheme}
+          }
       }
   }
   ```
-- **Port Exposure:** Only port 80 and 443 exposed publicly. Port 4000/4010 is bound exclusively to `127.0.0.1`.
+- **Port Exposure:** Only port 80 and 443 exposed publicly. Port 4000 is bound exclusively to internal bridge network / `127.0.0.1`.
+- **Rollback Mechanism:** Automated image rollback script (`scripts/rollback.sh`) re-pins the container image to a specified previous SHA/tag while preserving the persistent database volume.
 
 ### C. Persistent Storage Topology
 - **Single-Writer Constraint:** SQLite requires exclusive filesystem locking. Exactly **one** container instance mounts the volume.

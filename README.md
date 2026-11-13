@@ -235,6 +235,17 @@ shlita/
 └── compose.yaml               # Docker Compose specification with persistent volume
 ```
 
+### Step 11 — Independent Engineering Baseline & Evidence Reconciliation
+- [Step 11 Baseline Verification Report](docs/step-11/BASELINE_VERIFICATION.md)
+- [Evidence Reconciliation Register](docs/step-11/CLAIM_EVIDENCE_REGISTER.md)
+- [Step 12 Prerequisites](docs/step-11/STEP_12_PREREQUISITES.md)
+
+### Step 12 — Persistent HTTPS Staging Deployment
+- [Step 12 Staging Verification Report](docs/step-12/STAGING_VERIFICATION.md)
+- **Deployment Spec:** Single-instance container behind Caddy 2 TLS reverse proxy (`compose.staging.yaml`, `Caddyfile`)
+- **Planned Staging Gateway URL:** `https://gateway.staging.shlita.xyz` *(planned locked staging endpoint; live public DNS/TLS pending cloud host provisioning)*
+- **Persistence & SRE:** SQLite WAL persistent volume at `/var/lib/shlita`, automated nightly `VACUUM INTO` snapshots with retention pruning, off-volume backup replication, and automated image rollback (`scripts/rollback.sh`).
+
 ---
 
 ## Audit & Verification Reports
@@ -243,6 +254,7 @@ Every roadmap step produces permanent, independently auditable engineering artif
 
 | Milestone | Report Focus | Key Documents |
 |---|---|---|
+| **Step 12** | Persistent HTTPS Staging | [Staging Verification](docs/step-12/STAGING_VERIFICATION.md) • [Deployment Blueprint](docs/step-8/DEPLOYMENT_BLUEPRINT.md) • [Rollback Runbook](scripts/rollback.sh) |
 | **Step 11** | Engineering Baseline & Browser E2E | [Verification Baseline](docs/step-11/VERIFICATION_BASELINE.md) • [Browser E2E Report](docs/step-11/DASHBOARD_BROWSER_VERIFICATION.md) • [Claim Register](docs/step-11/CLAIM_EVIDENCE_REGISTER.md) • [Solana Reconciliation](docs/step-11/SOLANA_EVIDENCE_RECONCILIATION.md) |
 | **Step 10** | Security Audit & Production Gates | [Final Audit Synthesis](docs/step-10/FINAL_AUDIT.md) • [Security Verdict](docs/step-10/SECURITY_VERDICT.md) • [Master Release Gates](docs/step-10/RELEASE_GATES.md) • [Go/No-Go Decision](docs/step-10/PILOT_GO_NO_GO.md) |
 | **Step 9** | Staging Verification & Pilot Testing | [Staging Verification](docs/step-9/STAGING_VERIFICATION.md) • [10-Way Concurrency](docs/step-9/FINANCIAL_TEST_RESULTS.md) • [Persistence Recovery](docs/step-9/PERSISTENCE_RECOVERY.md) |

@@ -68,7 +68,7 @@ Resolved in Step 11 via Playwright and Chromium. Verified in [GitHub Actions run
 5. Sign-out and return to login screen
 
 ### P9 — `/metrics` OpenAPI Documentation (LOW PRIORITY)
-The `/metrics` endpoint exists in the gateway but is not in `docs/api/openapi.yaml`.
+The `/metrics` endpoint exists in the gateway and is documented in `docs/api/openapi.yaml`.
 
 ---
 
@@ -100,4 +100,4 @@ The `/metrics` endpoint exists in the gateway but is not in `docs/api/openapi.ya
 | Health monitoring | ⚠️ SHOULD HAVE |
 | Browser E2E test | ✅ COMPLETED in Step 11 (Run 43374212468) |
 | Documentation error fixes | ⚠️ SHOULD HAVE |
-| Funded Solana test reproduction | ✅ Not required for Step 12 (staging can use simulation mode) |
+| Funded Solana test reproduction | ⚠️ Historically reported, currently blocked (not required for Step 12) |

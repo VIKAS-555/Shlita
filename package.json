@@ -16,6 +16,8 @@
     "test:solana-local": "tsx scripts/solana-local-settlement.ts",
     "backup": "tsx packages/gateway/src/backup-cli.ts",
     "restore": "tsx packages/gateway/src/restore-cli.ts",
+    "test:smoke": "node scripts/staging-smoke-test.mjs",
+    "rollback": "./scripts/rollback.sh",
     "test:watch": "vitest",
     "demo": "tsx demo/run-demo.ts"
   },

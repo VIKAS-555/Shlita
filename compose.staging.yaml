@@ -1,0 +1,96 @@
+services:
+  gateway:
+    image: ${SHLITA_IMAGE:-ghcr.io/xiaoarnav/shlita-gateway:staging}
+    container_name: shlita-staging-gateway
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4000:4000"
+    environment:
+      SHLITA_ENV: staging
+      PORT: "4000"
+      SHLITA_OPERATOR_KEY: ${SHLITA_OPERATOR_KEY:?SHLITA_OPERATOR_KEY must be set to at least 32 random characters}
+      SHLITA_OPERATOR_ORG: ${SHLITA_OPERATOR_ORG:-pilot-staging-alpha}
+      SHLITA_ALLOW_SIMULATION: "false"
+      SHLITA_SEED_DEMO: "false"
+      SHLITA_DB_PATH: /var/lib/shlita/ledger.db
+      SHLITA_STATE_DIR: /var/lib/shlita
+      SHLITA_BACKUP_DIR: /var/lib/shlita/backups
+      SHLITA_BACKUP_RETENTION: "14"
+      SHLITA_PUBLIC_ORIGIN: ${SHLITA_PUBLIC_ORIGIN:-https://gateway.staging.shlita.xyz}
+      SHLITA_TRUSTED_PROXIES: "127.0.0.1,::1"
+      HELIUS_API_KEY: ${HELIUS_API_KEY:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      SOLANA_NETWORK: devnet
+      SHLITA_ALLOW_MAINNET: "false"
+    volumes:
+      - shlita-data:/var/lib/shlita
+      - shlita-external-backups:/var/backups/shlita-external
+    networks:
+      - shlita-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: shlita-staging-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SHLITA_STAGING_DOMAIN: ${SHLITA_STAGING_DOMAIN:-gateway.staging.shlita.xyz}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - shlita-net
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+  backup-worker:
+    image: ${SHLITA_IMAGE:-ghcr.io/xiaoarnav/shlita-gateway:staging}
+    container_name: shlita-staging-backup-worker
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        echo "Starting Shlita automated backup worker (interval: 86400s)..."
+        while true; do
+          sleep 86400
+          echo "Running scheduled ledger backup..."
+          node dist/packages/gateway/src/backup-cli.js || true
+          echo "Scheduled backup completed."
+        done
+    environment:
+      SHLITA_DB_PATH: /var/lib/shlita/ledger.db
+      SHLITA_BACKUP_DIR: /var/backups/shlita-external
+      SHLITA_BACKUP_RETENTION: "14"
+    volumes:
+      - shlita-data:/var/lib/shlita
+      - shlita-external-backups:/var/backups/shlita-external
+    networks:
+      - shlita-net
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+volumes:
+  shlita-data:
+    name: shlita-staging-data
+  shlita-external-backups:
+    name: shlita-staging-external-backups
+  caddy-data:
+    name: shlita-staging-caddy-data
+  caddy-config:
+    name: shlita-staging-caddy-config
+
+networks:
+  shlita-net:
+    driver: bridge
