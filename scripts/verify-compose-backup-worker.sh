@@ -67,15 +67,15 @@ if [ "$GW_STATUS" != "healthy" ]; then
   exit 1
 fi
 
-# Verify process 1 inside backup-worker container runs as shlita (UID 10001, GID 10001)
-PID1_UID="$(docker compose -f compose.staging.yaml exec -T backup-worker awk '/^Uid:/ {print $2}' /proc/1/status 2>/dev/null || true)"
-PID1_UID="${PID1_UID//[$'\r\n ']/}"
-PID1_GID="$(docker compose -f compose.staging.yaml exec -T backup-worker awk '/^Gid:/ {print $2}' /proc/1/status 2>/dev/null || true)"
-PID1_GID="${PID1_GID//[$'\r\n ']/}"
+# Verify worker process runs under configured runtime user shlita (UID 10001, GID 10001)
+WORKER_PROC_UID="$(docker compose -f compose.staging.yaml exec -T backup-worker ps -u shlita -o uid= 2>/dev/null | head -n 1 || true)"
+WORKER_PROC_UID="${WORKER_PROC_UID//[$'\r\n ']/}"
+WORKER_PROC_GID="$(docker compose -f compose.staging.yaml exec -T backup-worker ps -u shlita -o gid= 2>/dev/null | head -n 1 || true)"
+WORKER_PROC_GID="${WORKER_PROC_GID//[$'\r\n ']/}"
 
-echo "backup-worker PID 1 user: UID=$PID1_UID, GID=$PID1_GID"
-if [ "$PID1_UID" != "10001" ] || [ "$PID1_GID" != "10001" ]; then
-  echo "FAIL: Expected backup-worker PID 1 to run as 10001:10001, got $PID1_UID:$PID1_GID" >&2
+echo "backup-worker process ownership: UID=$WORKER_PROC_UID, GID=$WORKER_PROC_GID"
+if [ "$WORKER_PROC_UID" != "10001" ] || [ "$WORKER_PROC_GID" != "10001" ]; then
+  echo "FAIL: Expected backup-worker process to run as 10001:10001, got $WORKER_PROC_UID:$WORKER_PROC_GID" >&2
   exit 1
 fi
 
@@ -106,6 +106,15 @@ done
 if [ "$WORKER_STATUS" != "healthy" ]; then
   echo "FAIL: backup-worker failed to become healthy (status: $WORKER_STATUS)" >&2
   docker compose -f compose.staging.yaml logs backup-worker >&2
+  exit 1
+fi
+
+# Verify /tmp/backup-worker-healthy is owned by shlita (UID 10001, GID 10001)
+HEALTH_OWNER="$(docker compose -f compose.staging.yaml exec -T backup-worker stat -c '%u:%g' /tmp/backup-worker-healthy 2>/dev/null || true)"
+HEALTH_OWNER="${HEALTH_OWNER//[$'\r\n ']/}"
+echo "Health status file owner: $HEALTH_OWNER"
+if [ "$HEALTH_OWNER" != "10001:10001" ]; then
+  echo "FAIL: Expected /tmp/backup-worker-healthy to be owned by 10001:10001, got $HEALTH_OWNER" >&2
   exit 1
 fi
 
