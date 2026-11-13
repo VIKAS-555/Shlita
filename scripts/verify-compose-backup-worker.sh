@@ -28,12 +28,11 @@ echo "============================================================"
 echo " Starting Shlita Step 12 Isolated Compose Worker Drill"
 echo "============================================================"
 
-# Tracking active disposable projects for safe cleanup
+# Global tracking of active disposable projects and canary volumes
 DISPOSABLE_PROJECTS=()
 CANARY_VOLUMES=()
 
 cleanup() {
-  local exit_code=$?
   echo "Executing scoped cleanup handler..."
   for proj in "${DISPOSABLE_PROJECTS[@]:-}"; do
     if [ -n "$proj" ]; then
@@ -46,9 +45,9 @@ cleanup() {
       docker volume rm -f "$c_vol" >/dev/null 2>&1 || true
     fi
   done
-  exit "$exit_code"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 1' INT TERM
 
 # Build or reuse staging image
 IMAGE_NAME="${SHLITA_IMAGE:-shlita:staging-verify}"
@@ -56,6 +55,11 @@ if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
   echo "Building container image $IMAGE_NAME..."
   docker build -t "$IMAGE_NAME" .
 fi
+
+export SHLITA_IMAGE="$IMAGE_NAME"
+export SHLITA_OPERATOR_KEY="0123456789abcdef0123456789abcdef0123456789abcdef"
+export SHLITA_OPERATOR_ORG="pilot-staging-alpha"
+export SHLITA_BACKUP_INTERVAL_SECONDS="86400"
 
 # Preflight Isolation Validator
 # Fails closed if the resolved Compose configuration references any protected staging resources
@@ -87,13 +91,6 @@ validate_compose_isolation() {
     fi
   done
 
-  # Verify TypeScript validator if node/tsx is available
-  if [ -f "packages/gateway/src/compose-isolation.ts" ]; then
-    if npx tsx packages/gateway/src/compose-isolation.ts - "$target_project" <<< "$resolved_cfg" >/dev/null 2>&1; then
-      true
-    fi
-  fi
-
   return 0
 }
 
@@ -102,8 +99,8 @@ validate_compose_isolation() {
 # ============================================================
 echo "Running Isolation Regression 1: Preflight fail-closed check..."
 UNISOLATED_PROJ="test-unisolated-$$-${RANDOM}"
-# Unset any isolation overrides to let defaults (staging names) evaluate
 (
+  # Unset isolation overrides so defaults (staging names) evaluate
   unset SHLITA_GATEWAY_CONTAINER SHLITA_BACKUP_CONTAINER SHLITA_CADDY_CONTAINER \
         SHLITA_DATA_VOLUME SHLITA_BACKUPS_VOLUME SHLITA_CADDY_DATA_VOLUME \
         SHLITA_CADDY_CONFIG_VOLUME SHLITA_NETWORK || true
@@ -116,7 +113,7 @@ UNISOLATED_PROJ="test-unisolated-$$-${RANDOM}"
 echo "PASS: Preflight validation correctly failed closed on unisolated staging configuration."
 
 # ============================================================
-# Regression Test 2: Pre-existing Volume Survival Verification
+# Regression Test 2: Pre-existing Volume Survival Setup
 # ============================================================
 echo "Running Isolation Regression 2: Pre-existing volume survival setup..."
 CANARY_DATA_VOL="shlita-canary-ledger-$$-${RANDOM}"
@@ -126,22 +123,15 @@ CANARY_VOLUMES+=("$CANARY_DATA_VOL" "$CANARY_BACKUP_VOL")
 docker volume create "$CANARY_DATA_VOL" >/dev/null
 docker volume create "$CANARY_BACKUP_VOL" >/dev/null
 
-docker run --rm -v "${CANARY_DATA_VOL}:/data" "$IMAGE_NAME" node -e '
-  import fs from "node:fs";
-  fs.writeFileSync("/data/sentinel.txt", "CANARY_LEDGER_DATA_UNTOUCHED");
-'
-docker run --rm -v "${CANARY_BACKUP_VOL}:/data" "$IMAGE_NAME" node -e '
-  import fs from "node:fs";
-  fs.writeFileSync("/data/sentinel.txt", "CANARY_BACKUPS_DATA_UNTOUCHED");
-'
+# Seed sentinel files using root entrypoint to ensure write access regardless of volume permissions
+docker run --rm --entrypoint "" -v "${CANARY_DATA_VOL}:/data" "$IMAGE_NAME" sh -c 'echo "CANARY_LEDGER_DATA_UNTOUCHED" > /data/sentinel.txt'
+docker run --rm --entrypoint "" -v "${CANARY_BACKUP_VOL}:/data" "$IMAGE_NAME" sh -c 'echo "CANARY_BACKUPS_DATA_UNTOUCHED" > /data/sentinel.txt'
 
 assert_canaries_intact() {
   local context="$1"
   local d_val
-  d_val="$(docker run --rm -v "${CANARY_DATA_VOL}:/data" "$IMAGE_NAME" node -e '
-    import fs from "node:fs";
-    process.stdout.write(fs.readFileSync("/data/sentinel.txt", "utf-8").trim());
-  ' 2>/dev/null || true)"
+  d_val="$(docker run --rm --entrypoint "" -v "${CANARY_DATA_VOL}:/data" "$IMAGE_NAME" cat /data/sentinel.txt 2>/dev/null || true)"
+  d_val="${d_val//[$'\r\n ']/}"
 
   if [ "$d_val" != "CANARY_LEDGER_DATA_UNTOUCHED" ]; then
     echo "FAIL: Canary ledger volume was modified or deleted ($context)! Got: '$d_val'" >&2
@@ -149,10 +139,8 @@ assert_canaries_intact() {
   fi
 
   local b_val
-  b_val="$(docker run --rm -v "${CANARY_BACKUP_VOL}:/data" "$IMAGE_NAME" node -e '
-    import fs from "node:fs";
-    process.stdout.write(fs.readFileSync("/data/sentinel.txt", "utf-8").trim());
-  ' 2>/dev/null || true)"
+  b_val="$(docker run --rm --entrypoint "" -v "${CANARY_BACKUP_VOL}:/data" "$IMAGE_NAME" cat /data/sentinel.txt 2>/dev/null || true)"
+  b_val="${b_val//[$'\r\n ']/}"
 
   if [ "$b_val" != "CANARY_BACKUPS_DATA_UNTOUCHED" ]; then
     echo "FAIL: Canary backup volume was modified or deleted ($context)! Got: '$b_val'" >&2
@@ -173,7 +161,6 @@ FAIL_PROJ="shlita-simfail-$$-${RANDOM}"
 DISPOSABLE_PROJECTS+=("$FAIL_PROJ")
 
 (
-  export SHLITA_IMAGE="$IMAGE_NAME"
   export SHLITA_GATEWAY_CONTAINER="${FAIL_PROJ}-gateway"
   export SHLITA_BACKUP_CONTAINER="${FAIL_PROJ}-backup-worker"
   export SHLITA_CADDY_CONTAINER="${FAIL_PROJ}-caddy"
@@ -182,8 +169,6 @@ DISPOSABLE_PROJECTS+=("$FAIL_PROJ")
   export SHLITA_CADDY_DATA_VOLUME="${FAIL_PROJ}-caddy-data"
   export SHLITA_CADDY_CONFIG_VOLUME="${FAIL_PROJ}-caddy-config"
   export SHLITA_NETWORK="${FAIL_PROJ}-net"
-  export SHLITA_OPERATOR_KEY="0123456789abcdef0123456789abcdef0123456789abcdef"
-  export SHLITA_OPERATOR_ORG="pilot-staging-alpha"
   export PORT="4021"
 
   # Validate isolation
@@ -198,9 +183,8 @@ DISPOSABLE_PROJECTS+=("$FAIL_PROJ")
     exit 1
   fi
 
-  # Simulate failure during verification
+  # Simulate failure and perform scoped teardown
   echo "Simulating failure during test execution..."
-  # Scoped teardown of the failed project
   docker compose -p "$FAIL_PROJ" -f compose.staging.yaml down -v --remove-orphans >/dev/null 2>&1 || true
 )
 
@@ -224,7 +208,6 @@ echo "============================================================"
 PROJECT_NAME="shlita-drill-$$-${RANDOM}"
 DISPOSABLE_PROJECTS+=("$PROJECT_NAME")
 
-export SHLITA_IMAGE="$IMAGE_NAME"
 export SHLITA_GATEWAY_CONTAINER="${PROJECT_NAME}-gateway"
 export SHLITA_BACKUP_CONTAINER="${PROJECT_NAME}-backup-worker"
 export SHLITA_CADDY_CONTAINER="${PROJECT_NAME}-caddy"
@@ -233,10 +216,7 @@ export SHLITA_BACKUPS_VOLUME="${PROJECT_NAME}-backups"
 export SHLITA_CADDY_DATA_VOLUME="${PROJECT_NAME}-caddy-data"
 export SHLITA_CADDY_CONFIG_VOLUME="${PROJECT_NAME}-caddy-config"
 export SHLITA_NETWORK="${PROJECT_NAME}-net"
-export SHLITA_OPERATOR_KEY="0123456789abcdef0123456789abcdef0123456789abcdef"
-export SHLITA_OPERATOR_ORG="pilot-staging-alpha"
 export PORT="4031"
-export SHLITA_BACKUP_INTERVAL_SECONDS="86400"
 
 echo "Validating resolved Compose configuration before startup..."
 validate_compose_isolation "$PROJECT_NAME"
