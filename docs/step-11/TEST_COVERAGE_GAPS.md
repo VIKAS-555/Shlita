@@ -41,14 +41,26 @@
 
 ---
 
+## Dashboard Browser E2E Verification Resolved in Step 11 (1 test)
+
+Resolved in Step 11 via Playwright and Chromium. Verified in [GitHub Actions CI run 43374212468](https://github.com/XiaoArnav/Shlita/actions/runs/43374212468) using the command `npm run test:browser`.
+
+The suite (`tests/step-11/dashboard.browser.test.ts`) records one passing Playwright Chromium test covering:
+1. Operator sign-in and session cookie initialization
+2. Agent enrollment and single-view API key display
+3. Live spend and telemetry updates without reloading
+4. Freeze persistence after reload
+5. Sign-out and return to login screen
+
+---
+
 ## Remaining Gaps (not addressed in Step 11)
 
 | Gap | Reason Not Addressed | Recommended Action |
 |---|---|---|
-| Browser-level dashboard E2E | Playwright not available on host | Add `@playwright/test` to devDependencies in Step 12; write 5-step smoke test |
-| Funded Solana settlement reproduction | Missing `subscriptions_program.so` binary | Provide binary or build from source (program-v0.5.0) |
+| Mobile viewport accessibility | No dedicated mobile a11y tooling configured | Add `axe-playwright` / mobile viewport checks to E2E suite |
+| Funded Solana settlement reproduction | Missing `subscriptions_program.so` binary | Status remains historically reported and currently blocked until local validator binary is built from source (program-v0.5.0) |
 | Multi-process concurrent budget enforcement | Requires running two Node processes simultaneously | Integration test using `spawn`; add in Step 12+ |
-| Automated database backup + restore | No restore test exists | Add `scripts/backup-restore-verify.ts` in Step 12 |
+| Automated database backup + restore | Implemented and verified in Step 12 | Verified via `VACUUM INTO` and `restoreLedgerBackup` in Step 12 |
 | SDK `isReplay` on `ProxyResult` | SDK does not expose this field | Add to `ProxyResult` type in Step 12 (SDK-02) |
-| `/metrics` in OpenAPI spec | Documentation gap only | Update `docs/api/openapi.yaml` |
-| Mobile viewport accessibility | No a11y tooling configured | Add `axe-playwright` to E2E suite in Step 12 |
+| `/metrics` in OpenAPI spec | Resolved in Step 12 | Updated `docs/api/openapi.yaml` |
