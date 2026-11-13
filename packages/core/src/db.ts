@@ -339,10 +339,11 @@ export class SqliteLedger {
     if (!this.db) throw new Error('Persistent ledger is required for backup.');
     const directory = path.dirname(dest);
     fs.mkdirSync(directory, { recursive: true });
-    const sqlite = require('node:sqlite') as {
-      backup: (source: DatabaseSync, destination: string) => Promise<number>;
-    };
-    await sqlite.backup(this.db, dest);
+    if (fs.existsSync(dest)) {
+      fs.rmSync(dest, { force: true });
+    }
+    const escapedDest = dest.replace(/'/g, "''");
+    this.db.exec(`VACUUM INTO '${escapedDest}'`);
     fs.chmodSync(dest, 0o600);
     const check = new NodeDatabaseSync(dest, { readOnly: true });
     try {

@@ -1,0 +1,27 @@
+{
+    admin off
+}
+
+{$SHLITA_STAGING_DOMAIN:gateway.staging.shlita.xyz} {
+    encode zstd gzip
+
+    request_body {
+        max_size 5mb
+    }
+
+    # Public uncredentialed health, ready, metrics endpoints
+    @public_probe path /health /ready /metrics
+    handle @public_probe {
+        reverse_proxy gateway:4000
+    }
+
+    # Core gateway proxy and management endpoints
+    handle {
+        reverse_proxy gateway:4000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+}

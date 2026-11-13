@@ -9,8 +9,10 @@ info:
     settlement stays NOT_SUBMITTED, and fundsMoved is false until a chain settlement is confirmed.
     This document does not describe a public hosted gateway. Call the gateway you run.
 servers:
+  - url: https://gateway.staging.shlita.xyz
+    description: Staging persistent HTTPS gateway (locked staging mode)
   - url: http://127.0.0.1:4000
-    description: Local gateway. Replace the host with the gateway you operate.
+    description: Local gateway development instance
 tags:
   - name: public
   - name: session

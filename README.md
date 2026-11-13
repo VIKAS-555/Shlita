@@ -253,6 +253,17 @@ Shlita has undergone independent security auditing, staging deployment verificat
 - [Commercial Production Blockers & Non-Technical Requirements](docs/step-10/COMMERCIAL_LAUNCH_BLOCKERS.md)
 - [Prioritized Remediation Roadmap & Final Recommendations](docs/step-10/FINAL_RECOMMENDATIONS.md)
 
+### Step 11 — Independent Engineering Baseline & Evidence Reconciliation
+- [Step 11 Baseline Verification Report](docs/step-11/BASELINE_VERIFICATION.md)
+- [Evidence Reconciliation Register](docs/step-11/CLAIM_EVIDENCE_REGISTER.md)
+- [Step 12 Prerequisites](docs/step-11/STEP_12_PREREQUISITES.md)
+
+### Step 12 — Persistent HTTPS Staging Deployment
+- [Step 12 Staging Verification Report](docs/step-12/STAGING_VERIFICATION.md)
+- **Deployment Spec:** Single-instance container behind Caddy 2 TLS reverse proxy (`compose.staging.yaml`, `Caddyfile`)
+- **Staging Gateway URL:** `https://gateway.staging.shlita.xyz` *(locked staging; live public DNS/TLS pending cloud host provisioning)*
+- **Persistence & SRE:** SQLite WAL persistent volume at `/var/lib/shlita`, automated nightly `VACUUM INTO` snapshots with retention pruning, off-volume backup replication, and automated image rollback (`scripts/rollback.sh`).
+
 ---
 
 ## 8. License

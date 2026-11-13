@@ -194,18 +194,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set lowercase repository name for GHCR
+        run: |
+          echo "REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       - name: Build and push staging container image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: |
-            ghcr.io/xiaoarnav/shlita-gateway:staging
-            ghcr.io/xiaoarnav/shlita-gateway:${{ github.sha }}
+            ghcr.io/${{ env.REPO_LC }}:staging
+            ghcr.io/${{ env.REPO_LC }}:${{ github.sha }}
 
       - name: Verify Staging Gateway Artifacts & Health
         run: |
           echo "Verifying Staging Deployment on GitHub..."
-          docker pull ghcr.io/xiaoarnav/shlita-gateway:staging
-          docker run --rm ghcr.io/xiaoarnav/shlita-gateway:staging node -v
-          echo "Staging Deployment Successfully Verified: ghcr.io/xiaoarnav/shlita-gateway:staging"
+          docker pull ghcr.io/${{ env.REPO_LC }}:staging
+          docker run --rm ghcr.io/${{ env.REPO_LC }}:staging node -v
+          DIGEST="$(docker inspect --format='{{index .RepoDigests 0}}' "ghcr.io/${{ env.REPO_LC }}:staging" 2>/dev/null || echo "pinned-by-sha-${{ github.sha }}")"
+          echo "Staging Deployment Successfully Verified: ghcr.io/${{ env.REPO_LC }}:staging (${DIGEST})"
