@@ -1,7 +1,7 @@
 services:
   gateway:
     image: ${SHLITA_IMAGE:-ghcr.io/xiaoarnav/shlita-gateway:staging}
-    container_name: shlita-staging-gateway
+    container_name: ${SHLITA_GATEWAY_CONTAINER:-shlita-staging-gateway}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${PORT:-4000}:4000"
@@ -36,7 +36,7 @@ services:
 
   caddy:
     image: caddy:2.8-alpine
-    container_name: shlita-staging-caddy
+    container_name: ${SHLITA_CADDY_CONTAINER:-shlita-staging-caddy}
     restart: unless-stopped
     ports:
       - "80:80"
@@ -55,7 +55,7 @@ services:
 
   backup-worker:
     image: ${SHLITA_IMAGE:-ghcr.io/xiaoarnav/shlita-gateway:staging}
-    container_name: shlita-staging-backup-worker
+    container_name: ${SHLITA_BACKUP_CONTAINER:-shlita-staging-backup-worker}
     restart: unless-stopped
     command:
       - /bin/sh
@@ -127,14 +127,15 @@ services:
 
 volumes:
   shlita-data:
-    name: shlita-staging-data
+    name: ${SHLITA_DATA_VOLUME:-shlita-staging-data}
   shlita-external-backups:
-    name: shlita-staging-external-backups
+    name: ${SHLITA_BACKUPS_VOLUME:-shlita-staging-external-backups}
   caddy-data:
-    name: shlita-staging-caddy-data
+    name: ${SHLITA_CADDY_DATA_VOLUME:-shlita-staging-caddy-data}
   caddy-config:
-    name: shlita-staging-caddy-config
+    name: ${SHLITA_CADDY_CONFIG_VOLUME:-shlita-staging-caddy-config}
 
 networks:
   shlita-net:
+    name: ${SHLITA_NETWORK:-shlita-staging-net}
     driver: bridge

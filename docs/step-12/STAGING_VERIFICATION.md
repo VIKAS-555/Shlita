@@ -83,9 +83,21 @@ Implemented WAL-safe backup implementation in `packages/core/src/db.ts`, automat
 ✓ Step 12 — Backup, Prune, and Restore Flow > surfaces failures on unwritable backup destination and preserves last known-good snapshot
 ```
 
-### B.1 Real Compose Backup Worker Service Verification
-The real `backup-worker` Compose service was hardened and verified via `scripts/verify-compose-backup-worker.sh` and integrated into the GitHub Actions CI `image` job:
-1. **Worker Healthcheck Hardening:** In `compose.staging.yaml`, overridden the inherited Dockerfile HTTP `/ready` check (which attempted port 4000) with a dedicated worker health probe:
+### B.1 Isolated Real Compose Backup Worker Service Verification
+The real `backup-worker` Compose service was hardened and isolated via `scripts/verify-compose-backup-worker.sh`, unit-tested in `tests/step-12/compose.isolation.test.ts`, and integrated into the GitHub Actions CI `image` job:
+
+1. **Complete Test Isolation & Parameterization:**
+   In `compose.staging.yaml`, container names (`${SHLITA_GATEWAY_CONTAINER:-...}`, `${SHLITA_BACKUP_CONTAINER:-...}`, `${SHLITA_CADDY_CONTAINER:-...}`), volume names (`${SHLITA_DATA_VOLUME:-...}`, `${SHLITA_BACKUPS_VOLUME:-...}`, etc.), and network name (`${SHLITA_NETWORK:-...}`) are parameterized with safe staging defaults. In verification runs, each run generates a unique Compose project (`shlita-drill-$$-${RANDOM}`) and unique disposable container and volume names.
+
+2. **Preflight Configuration Check (Fail-Closed Guardrail):**
+   Before starting up or tearing down any services, `validate_compose_isolation` resolves the Compose configuration (`docker compose config`). If any effective resource name points to protected staging resources (`shlita-staging-gateway`, `shlita-staging-data`, `shlita-staging-external-backups`, etc.), the script fails closed immediately without starting containers or executing `docker compose down -v`.
+
+3. **Regression Proof: Volume Survival Across Success & Failure:**
+   - **Pre-existing Sentinel Volumes:** Seeded canary ledger and backup volumes (`shlita-canary-ledger-*`, `shlita-canary-backups-*`) containing sentinel marker files.
+   - **Failed Run Survival:** Executed a disposable test stack (`shlita-simfail-*`), simulated mid-test failure, executed scoped teardown. Verified that pre-existing sentinel volumes remained completely untouched and intact, while all failed test resources were cleaned up.
+   - **Successful Run Survival:** After running the full successful drill on disposable stack `shlita-drill-*`, verified that pre-existing canary volumes remained intact, and all disposable test volumes and containers were cleanly purged.
+
+4. **Worker Healthcheck Hardening:** In `compose.staging.yaml`, overridden the inherited Dockerfile HTTP `/ready` check (which attempted port 4000) with a dedicated worker health probe:
    ```yaml
    healthcheck:
      test: ["CMD-SHELL", "test -f /tmp/backup-worker-healthy || exit 1"]
@@ -94,11 +106,11 @@ The real `backup-worker` Compose service was hardened and verified via `scripts/
      start_period: 5s
      retries: 3
    ```
-2. **Prompt Cycle Trigger:** Configured `compose.staging.yaml` worker loop to monitor `/tmp/trigger-backup` and support `SHLITA_BACKUP_RUN_ON_STARTUP=true`. Touching `/tmp/trigger-backup` triggers an immediate cycle using the exact same code path (`node dist/packages/gateway/src/backup-cli.js`) as the scheduled 24h cron loop.
-3. **Runtime User & Volume Verification:** Verified `backup-worker` runs with non-root runtime user `shlita` (`UID: 10001, GID: 10001`) and mounts `/var/lib/shlita` (source DB) and `/var/backups/shlita-external` (backup volume).
-4. **Disposable Ledger Seed & Snapshot:** Seeded a committed operation (`op_worker_drill_999`, amount `15000` micro-USDC). Triggered a prompt backup, confirming snapshot generation with mode `0600`.
-5. **Restore & Record Verification:** Restored the generated snapshot into `/var/backups/shlita-external/restored-compose-drill.db`. Verified `PRAGMA integrity_check` returned `ok`, and validated that `op_worker_drill_999` with `15000` micro-USDC was preserved.
-6. **Failure & Preservation Drill:** Made the backup destination read-only (`chmod 555`). Triggered a backup cycle. Confirmed:
+5. **Prompt Cycle Trigger:** Configured `compose.staging.yaml` worker loop to monitor `/tmp/trigger-backup` and support `SHLITA_BACKUP_RUN_ON_STARTUP=true`. Touching `/tmp/trigger-backup` triggers an immediate cycle using the exact same code path (`node dist/packages/gateway/src/backup-cli.js`) as the scheduled 24h cron loop.
+6. **Runtime User & Volume Verification:** Verified `backup-worker` runs with non-root runtime user `shlita` (`UID: 10001, GID: 10001`) via in-container `/proc` scan and mounts `/var/lib/shlita` (source DB) and `/var/backups/shlita-external` (backup volume).
+7. **Disposable Ledger Seed & Snapshot:** Seeded a committed operation (`op_worker_drill_999`, amount `15000` micro-USDC). Triggered a prompt backup, confirming snapshot generation with mode `0600`.
+8. **Restore & Record Verification:** Restored the generated snapshot into `/var/backups/shlita-external/restored-compose-drill.db`. Verified `PRAGMA integrity_check` returned `ok`, and validated that `op_worker_drill_999` with `15000` micro-USDC was preserved.
+9. **Failure & Preservation Drill:** Made the backup destination read-only (`chmod 555`). Triggered a backup cycle. Confirmed:
    - Worker logged `CRITICAL: Scheduled ledger backup failed!` to stderr.
    - Worker omitted any success message for that cycle.
    - Healthcheck file `/tmp/backup-worker-healthy` was removed, marking the container unhealthy.
@@ -148,8 +160,8 @@ Hardened `scripts/staging-smoke-test.mjs` against false `HEALTHY` results:
 ### F. Full Test Suite & E2E Validation
 - **Vitest Unit & Integration Matrix:**
   ```
-  Test Files  18 passed (18)
-       Tests  118 passed (118)
+  Test Files  19 passed (19)
+       Tests  124 passed (124)
   ```
 - **Playwright Chromium Dashboard Flow:**
   ```
@@ -178,12 +190,20 @@ As documented in Step 11 prerequisites (`STEP_12_PREREQUISITES.md`) and per Step
 | **BLOCKER-DNS-01** | Public DNS Delegation | `gateway.staging.shlita.xyz` does not resolve | Add DNS A/AAAA record pointing `gateway.staging.shlita.xyz` to VM public IP |
 | **BLOCKER-SECRET-01** | Stable Staging Operator Key | Staging secret store unpopulated | Add GitHub Actions secret `SHLITA_STAGING_OPERATOR_KEY` (>= 32 random hex characters) |
 
-### Live Staging Completion Criteria (Hold on Step 13):
+### Live Staging Completion Criteria & Status (Hold on Step 13):
 Per the maintainer specification, Step 12 live staging remains marked as **BLOCKED** and **Step 13 remains on hold** until maintainer provisioning allows completing the four mandatory live checks:
-1. **External Public HTTPS Verification:** Verify valid TLS handshake and `GET /ready` HTTP 200 from outside the host.
-2. **Redeploy Persistence:** Write a sandbox ledger record, redeploy the container stack, and verify that the exact same record persists.
-3. **Outage Alert & Recovery Delivery:** Induce a simulated gateway outage and confirm both the outage alert and recovery notification reach the configured notification destination.
-4. **Host Scheduled Backup Restore:** Restore an actual snapshot generated by the scheduled backup worker on that host into a separate database, verifying integrity and record preservation.
+
+| Live Check ID | Verification Requirement | Status | Required Input / Blocker | Owner |
+| :--- | :--- | :--- | :--- | :--- |
+| **LIVE-HTTPS-01** | Verify public TLS and `/ready` returning HTTP 200 from outside the host | ⚠️ **BLOCKED** | `BLOCKER-HOST-01` (Cloud VM) & `BLOCKER-DNS-01` (DNS A/AAAA record) | Maintainer (`XiaoArnav`) |
+| **LIVE-PERSIST-01** | Create sandbox ledger record, redeploy, and verify same operation ID and amount survive | ⚠️ **BLOCKED** | `BLOCKER-HOST-01` (Cloud VM with persistent SQLite mount) | Maintainer (`XiaoArnav`) |
+| **LIVE-ALERT-01** | Run controlled staging outage and confirm outage alert and recovery notification reach configured destination | ⚠️ **BLOCKED** | `BLOCKER-SECRET-01` (`SHLITA_ALERT_WEBHOOK_URL` / alert sink) | Maintainer (`XiaoArnav`) |
+| **LIVE-RESTORE-01** | Restore snapshot produced by scheduled worker on staging host into separate database; verify integrity and operation ID/amount | ⚠️ **BLOCKED** | `BLOCKER-HOST-01` (Host scheduled backup worker execution) | Maintainer (`XiaoArnav`) |
+
+1. **External Public HTTPS Verification (LIVE-HTTPS-01):** Verify valid TLS handshake and `GET /ready` HTTP 200 from outside the host (`gateway.staging.shlita.xyz`).
+2. **Redeploy Persistence (LIVE-PERSIST-01):** Write a sandbox ledger record, redeploy the container stack, and verify that the exact same record persists.
+3. **Outage Alert & Recovery Delivery (LIVE-ALERT-01):** Induce a simulated gateway outage and confirm both the outage alert and recovery notification reach the configured notification destination.
+4. **Host Scheduled Backup Restore (LIVE-RESTORE-01):** Restore an actual snapshot generated by the scheduled backup worker on that host into a separate database, verifying integrity and record preservation.
 
 ### Immediate Deployment Once Host is Provisioned:
 ```bash
