@@ -3,12 +3,13 @@
 **Document Reference:** `docs/step-12/STAGING_VERIFICATION.md`  
 **Parent Milestone:** Step 12 — Persistent HTTPS Staging Deployment  
 **Upstream Target:** `XiaoArnav/Shlita:main`  
-**Base Commit (PR #16 Merged):** `f5ba699188e1ca5c4bda607fa446a8608e9b345c` (PR #16 merged to `main`)
-**Baseline CI Run:** [Run #43457191871](https://github.com/XiaoArnav/Shlita/actions/runs/43457191871)
+**Base Commit (PR #17 Merged):** `b71f765a4c3b943cbd55f71de2e561f2120a4206` (PR #17 merged to `main`)
+**Baseline CI Run:** [Run #43466618100](https://github.com/XiaoArnav/Shlita/actions/runs/43466618100)
 **Collaborator Author:** `VIKAS-555 <vikas.tech0007@gmail.com>`
 **Date:** 2026-11-13
 **Target Staging URL:** `https://gateway.staging.shlita.xyz`
-**Target Container Image:** `ghcr.io/xiaoarnav/shlita:f5ba699188e1ca5c4bda607fa446a8608e9b345c` (`ghcr.io/xiaoarnav/shlita:staging`)
+**Target Container Image:** `ghcr.io/xiaoarnav/shlita:b71f765a4c3b943cbd55f71de2e561f2120a4206` (`ghcr.io/xiaoarnav/shlita:staging`)
+**Deployed Image Digest:** `ghcr.io/xiaoarnav/shlita@sha256:a7bce336bc2926fde03c4e5fb9de18b244037147cdd3be6d2f4e8eb6d3c9c3dd`
 **Staging Deployment ID:** `7769737563`
 
 ---
@@ -230,11 +231,52 @@ Per the maintainer specification, Step 12 live staging remains marked as **BLOCK
 
 ### Detailed Execution Logs & Evidence:
 
+```
+============================================================
+ Shlita Step 12: Live Staging Acceptance Checks
+ Target: https://gateway.staging.shlita.xyz (Host: gateway.staging.shlita.xyz)
+ Timestamp: 2026-11-13T16:55:51Z
+ Deployed Commit: b71f765a4c3b943cbd55f71de2e561f2120a4206
+ Published Image Digest: sha256:a7bce336bc2926fde03c4e5fb9de18b244037147cdd3be6d2f4e8eb6d3c9c3dd
+============================================================
+
+[LIVE-HTTPS-01] Checking public HTTPS reachability and TLS certificate...
+  Result: BLOCKED (DNS NXDOMAIN for gateway.staging.shlita.xyz)
+  Blocker: BLOCKER-DNS-01 (Public DNS delegation missing)
+  Required Owner: Maintainer (XiaoArnav)
+
+[LIVE-PERSIST-01] Checking ledger persistence across container redeploy...
+  Result: BLOCKED (Requires live host and operational HTTPS gateway)
+  Blocker: BLOCKER-HOST-01 (Cloud host unprovisioned)
+  Required Owner: Maintainer (XiaoArnav)
+
+[LIVE-ALERT-01] Checking outage alert & recovery notifications...
+  Result: BLOCKED (SHLITA_ALERT_WEBHOOK_URL is not set)
+  Blocker: BLOCKER-SECRET-01 (Staging alert destination webhook not configured)
+  Required Owner: Maintainer (XiaoArnav)
+
+[LIVE-RESTORE-01] Checking scheduled backup worker snapshot restore on host...
+  Result: BLOCKED (Requires live host with scheduled backup worker service)
+  Blocker: BLOCKER-HOST-01 (Cloud host unprovisioned)
+  Required Owner: Maintainer (XiaoArnav)
+
+============================================================
+ Live Staging Acceptance Status Summary
+============================================================
+LIVE-HTTPS-01 (Public TLS & /ready HTTP 200)       : BLOCKED
+LIVE-PERSIST-01 (Ledger Persistence Post-Redeploy) : BLOCKED
+LIVE-ALERT-01 (Outage & Recovery Notifications)    : BLOCKED
+LIVE-RESTORE-01 (Worker Snapshot Restore on Host)  : BLOCKED
+============================================================
+VERDICT: Step 12 Live Acceptance is BLOCKED pending maintainer infrastructure provisioning.
+Hold Step 13 until cloud VM, DNS record, and staging secrets are supplied.
+```
+
 1. **External Public HTTPS Verification (LIVE-HTTPS-01):**
    - **Target URL:** `https://gateway.staging.shlita.xyz/ready`
    - **Tested Command:** `curl -Iv https://gateway.staging.shlita.xyz/ready`
    - **DNS Verification:** `nslookup gateway.staging.shlita.xyz 8.8.8.8`
-   - **Timestamp:** `2026-11-13T16:01:00Z`
+   - **Timestamp:** `2026-11-13T16:55:51Z` (Local: `2026-11-13T22:25:51+05:30`)
    - **Result:** ⚠️ **BLOCKED** (`NXDOMAIN` — Could not resolve host `gateway.staging.shlita.xyz`).
    - **Missing Inputs:** `BLOCKER-DNS-01` (DNS A/AAAA record missing) and `BLOCKER-HOST-01` (Cloud VM unprovisioned).
 
@@ -252,7 +294,7 @@ Per the maintainer specification, Step 12 live staging remains marked as **BLOCK
      docker compose -f compose.staging.yaml up -d
      # 3. Verify operation record persists with exact amount
      ```
-   - **Status:** ⚠️ **BLOCKED** on `BLOCKER-HOST-01`.
+   - **Status:** ⚠️ **BLOCKED** on `BLOCKER-HOST-01` and `BLOCKER-SECRET-01`.
 
 3. **Outage Alert & Recovery Delivery (LIVE-ALERT-01):**
    - **Evaluation:** Verifies SRE monitoring probe delivery to webhook sink.
@@ -285,7 +327,6 @@ cd /opt/shlita
 cp .env.example .env # Set SHLITA_OPERATOR_KEY, SHLITA_OPERATOR_ORG, and SHLITA_STAGING_DOMAIN
 docker compose -f compose.staging.yaml up -d
 ./scripts/verify-live-staging.sh
-```
 ./scripts/staging-smoke-test.mjs
 ```
 
@@ -296,6 +337,6 @@ docker compose -f compose.staging.yaml up -d
 If a newly deployed image exhibits anomalies or fails health checks:
 ```bash
 # Roll back to the previous known-good image digest/tag:
-./scripts/rollback.sh ghcr.io/xiaoarnav/shlita-gateway:158e062
+./scripts/rollback.sh ghcr.io/xiaoarnav/shlita:f5ba699188e1ca5c4bda607fa446a8608e9b345c
 ```
 The rollback script verifies the target image, performs a graceful stop of the gateway container, starts the target image against the existing persistent volume `shlita-staging-data`, and waits for `/ready` to return 200. Zero ledger records are dropped.
