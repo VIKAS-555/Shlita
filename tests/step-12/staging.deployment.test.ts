@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import { describe, it, expect } from 'vitest';
 import { assessSecurityConfig } from '../../packages/gateway/src/security-config.js';
 import { createGatewayApp } from '../../packages/gateway/src/app.js';
@@ -178,6 +179,70 @@ describe('Step 12 — Backup, Prune, and Restore Flow', () => {
     expect(restoredEngine.getAuditLogs(10).length).toBeGreaterThan(0);
 
     restoredEngine.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('runs backup-cli and restore-cli matching compose staging volume topology', async () => {
+    const dir = tempDir();
+    const dbPath = path.join(dir, 'ledger.db');
+    const externalBackupDir = path.join(dir, 'external-backups');
+    fs.mkdirSync(externalBackupDir, { recursive: true });
+
+    // Seed a ledger with an active agent and reservation
+    const engine = createPolicyEngine(dbPath);
+    engine.registerAgent(
+      {
+        agentId: 'agent-cli-backup',
+        allowedVendors: ['api.helius.xyz'],
+        maxPerCallMicroUsdc: 50_000n,
+        periodBudgetMicroUsdc: 200_000n,
+        periodSeconds: 3600,
+        circuitBreaker: { maxConsecutiveErrors: 3, maxCallsPerMinute: 20 },
+      },
+      { rawApiKey: 'shlt_cli_backup_test_01', ownerOrg: STAGING_ORG }
+    );
+    engine.evaluateAndReserve({
+      agentId: 'agent-cli-backup',
+      vendor: 'api.helius.xyz',
+      estimatedCostMicroUsdc: 10000n,
+      timestamp: Date.now(),
+      idempotencyKey: 'cli-backup-key-01',
+    });
+    engine.close();
+
+    // Run backup-cli with environment variables matching compose.staging.yaml
+    const backupOut = execSync('npx tsx packages/gateway/src/backup-cli.ts', {
+      env: {
+        ...process.env,
+        SHLITA_DB_PATH: dbPath,
+        SHLITA_BACKUP_DIR: externalBackupDir,
+        SHLITA_BACKUP_RETENTION: '14',
+      },
+    }).toString();
+
+    const backupJson = JSON.parse(backupOut.trim());
+    expect(backupJson.event).toBe('backup');
+    expect(backupJson.integrity).toBe('ok');
+    expect(fs.existsSync(backupJson.file)).toBe(true);
+
+    // Run restore-cli into a brand new restored database
+    const restoredDbPath = path.join(dir, 'restored-cli-ledger.db');
+    const restoreOut = execSync(`npx tsx packages/gateway/src/restore-cli.ts "${backupJson.file}" "${restoredDbPath}"`, {
+      env: {
+        ...process.env,
+      },
+    }).toString();
+
+    const restoreJson = JSON.parse(restoreOut.trim());
+    expect(restoreJson.event).toBe('restore');
+    expect(restoreJson.integrity).toBe('ok');
+    expect(fs.existsSync(restoredDbPath)).toBe(true);
+
+    // Verify restored database contents
+    const restoredEngine = createPolicyEngine(restoredDbPath);
+    expect(restoredEngine.getAgentOwnerOrg('agent-cli-backup')).toBe(STAGING_ORG);
+    restoredEngine.close();
+
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });

@@ -38,10 +38,10 @@ Step 12 establishes the complete architecture, container infrastructure, locked 
 | **6. Image Rollback Procedure** | `scripts/rollback.sh` automated image pinning script without volume data loss | ✅ PASS | Script created, documented, and made executable |
 | **7. Health & Readiness Monitoring** | Public uncredentialed `GET /health`, `GET /ready`, `GET /metrics` | ✅ PASS | Verified in `tests/step-12/staging.deployment.test.ts` |
 | **8. Smoke Test & Latency Probe** | `scripts/staging-smoke-test.mjs` measuring latency and HTTP statuses | ✅ PASS | Probes `/health` and `/ready` with automated summary output |
-| **9. Automated Backup Worker** | `compose.staging.yaml` sidecar running `node dist/packages/gateway/src/backup-cli.js` with off-volume sync | ✅ PASS | Backups created with `VACUUM INTO`, chmod 0600, retention pruning |
-| **10. Backup Restoration Drill** | `packages/core/src/backup.ts` `restoreLedgerBackup()` into independent database | ✅ PASS | Verified in `tests/step-12/staging.deployment.test.ts` (test 2) |
+| **9. Automated Backup Worker** | `compose.staging.yaml` sidecar running `node dist/packages/gateway/src/backup-cli.js` with direct volume mount | ✅ PASS | Verified writable external backup mount, `VACUUM INTO`, retention pruning |
+| **10. Backup Restoration Drill** | `packages/core/src/backup.ts` `restoreLedgerBackup()` into independent database | ✅ PASS | Verified CLI and API restore in `tests/step-12/staging.deployment.test.ts` |
 | **11. Circuit Breaker Alert Drill** | Gateway returns 502 on upstream error, trips breaker on threshold, returns 403 `CIRCUIT_BREAKER_TRIPPED` | ✅ PASS | Verified in `tests/step-12/staging.deployment.test.ts` (test 4) |
-| **12. Unit & Integration Suite** | 110 tests across 17 test files | ✅ PASS | `npm test` exit code 0 |
+| **12. Unit & Integration Suite** | 111 tests across 17 test files | ✅ PASS | `npm test` exit code 0 |
 | **13. Browser Dashboard E2E** | Playwright Chromium headless test | ✅ PASS | `npm run test:browser` exit code 0 |
 | **14. SDK External Consumer** | External package unpack and run test | ✅ PASS | `node scripts/sdk-consumer-check.mjs` exit code 0 |
 

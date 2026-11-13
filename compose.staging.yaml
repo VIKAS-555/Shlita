@@ -66,18 +66,20 @@ services:
           sleep 86400
           echo "Running scheduled ledger backup..."
           node dist/packages/gateway/src/backup-cli.js || true
-          cp -u /var/lib/shlita/backups/*.db /var/backups/shlita-external/ 2>/dev/null || true
-          echo "Backup copy synced to off-volume destination."
+          echo "Scheduled backup completed."
         done
     environment:
       SHLITA_DB_PATH: /var/lib/shlita/ledger.db
-      SHLITA_BACKUP_DIR: /var/lib/shlita/backups
+      SHLITA_BACKUP_DIR: /var/backups/shlita-external
       SHLITA_BACKUP_RETENTION: "14"
     volumes:
-      - shlita-data:/var/lib/shlita:ro
+      - shlita-data:/var/lib/shlita
       - shlita-external-backups:/var/backups/shlita-external
     networks:
       - shlita-net
+    depends_on:
+      gateway:
+        condition: service_healthy
 
 volumes:
   shlita-data:
