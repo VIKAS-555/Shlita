@@ -30,6 +30,17 @@ type OperationRow = {
   cluster: string | null;
   createdAt: number;
 };
+type TelemetryEvent = {
+  id: string;
+  timestamp: string;
+  type: string;
+  statusCode: number;
+  agent: string;
+  vendor: string;
+  amountUsdc: number;
+  latencyMs: number;
+  details?: { reason?: string; reservationId?: string };
+};
 type Dashboard = {
   generatedAt: string;
   source: string;
@@ -77,6 +88,7 @@ export const LiveControlPlane: React.FC = () => {
   const [offline, setOffline] = useState(false);
   const [agents, setAgents] = useState<AgentRow[]>([]);
   const [operations, setOperations] = useState<OperationRow[]>([]);
+  const [telemetry, setTelemetry] = useState<TelemetryEvent[]>([]);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [issuedKey, setIssuedKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -84,10 +96,11 @@ export const LiveControlPlane: React.FC = () => {
 
   const load = useCallback(async (csrfToken: string, organizationId: string, expiresAt: number) => {
     setSession({ csrfToken, organizationId, expiresAt });
-    const [agentRes, operationRes, dashRes] = await Promise.all([
+    const [agentRes, operationRes, dashRes, telRes] = await Promise.all([
       request('/v1/agents'),
       request('/v1/operations'),
       request('/v1/dashboard'),
+      request('/v1/telemetry'),
     ]);
     if (agentRes.status === 401) {
       setSession(null);
@@ -101,6 +114,9 @@ export const LiveControlPlane: React.FC = () => {
     setAgents((await agentRes.json()).agents);
     setOperations((await operationRes.json()).operations);
     setDashboard(await dashRes.json());
+    if (telRes.ok) {
+      setTelemetry((await telRes.json()).events || []);
+    }
   }, []);
 
   useEffect(() => {
@@ -125,6 +141,17 @@ export const LiveControlPlane: React.FC = () => {
       active = false;
     };
   }, [load]);
+
+  // Live polling: refresh ledger, telemetry events, and spend figures without requiring manual page reload
+  useEffect(() => {
+    if (!session) return;
+    const interval = setInterval(() => {
+      void load(session.csrfToken, session.organizationId, session.expiresAt);
+    }, 1000);
+    return () => {
+      clearInterval(interval);
+    };
+  }, [session, load]);
 
   async function signIn(event: React.FormEvent) {
     event.preventDefault();
@@ -155,6 +182,7 @@ export const LiveControlPlane: React.FC = () => {
     setOperations([]);
     setDashboard(null);
     setIssuedKey(null);
+    setTelemetry([]);
   }
 
   async function mutate(path: string, body?: unknown) {
@@ -328,6 +356,22 @@ export const LiveControlPlane: React.FC = () => {
               })}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <section className="bg-card border border-border rounded-2xl p-4 space-y-3" data-testid="live-telemetry">
+        <h2 className="font-semibold text-sm">Live telemetry event stream</h2>
+        {telemetry.length === 0 && <p className="text-xs text-text-muted">No live events captured yet.</p>}
+        <div className="space-y-1">
+          {telemetry.map((event) => (
+            <div key={event.id} className="text-xs font-mono flex items-center justify-between border-b border-border/50 py-1" data-testid="telemetry-event">
+              <span className="text-text-muted">[{event.timestamp}]</span>
+              <span className={event.type === 'APPROVED' ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>{event.type}</span>
+              <span>{event.agent}</span>
+              <span>{event.vendor}</span>
+              <span>${event.amountUsdc.toFixed(4)} USDC</span>
+            </div>
+          ))}
         </div>
       </section>
 

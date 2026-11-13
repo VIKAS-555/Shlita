@@ -12,6 +12,7 @@
     "build": "tsc -b && tsc -p packages/sdk/tsconfig.json && vite build && (cp -r dist-ui/. dist/ 2>/dev/null || true)",
     "start": "node --import tsx packages/gateway/src/index.ts",
     "test": "vitest run",
+    "test:browser": "playwright test",
     "test:solana-local": "tsx scripts/solana-local-settlement.ts",
     "backup": "tsx packages/gateway/src/backup-cli.ts",
     "restore": "tsx packages/gateway/src/restore-cli.ts",
@@ -49,6 +50,7 @@
     "tailwind-merge": "^2.5.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.12",

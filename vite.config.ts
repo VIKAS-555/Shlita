@@ -22,5 +22,6 @@ export default defineConfig({
         external: ['node:sqlite'],
       },
     },
+    exclude: ['**/node_modules/**', '**/dist/**', '**/*.browser.test.ts'],
   },
 });
