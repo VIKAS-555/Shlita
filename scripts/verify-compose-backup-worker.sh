@@ -54,6 +54,7 @@ echo "Waiting for gateway service to become ready and healthy..."
 GW_STATUS="starting"
 for i in $(seq 1 30); do
   GW_STATUS="$(docker inspect --format='{{.State.Health.Status}}' shlita-staging-gateway 2>/dev/null || echo 'starting')"
+  GW_STATUS="${GW_STATUS//[$'\r\n ']/}"
   if [ "$GW_STATUS" = "healthy" ]; then
     echo "Gateway is healthy."
     break
@@ -67,17 +68,23 @@ if [ "$GW_STATUS" != "healthy" ]; then
 fi
 
 # Verify process 1 inside backup-worker container runs as shlita (UID 10001, GID 10001)
-PID1_UID="$(docker compose -f compose.staging.yaml exec -T backup-worker awk '/^Uid:/ {print $2}' /proc/1/status 2>/dev/null || docker compose -f compose.staging.yaml exec -T backup-worker ps -o uid= -p 1 | tr -d '\r\n ')"
-PID1_GID="$(docker compose -f compose.staging.yaml exec -T backup-worker awk '/^Gid:/ {print $2}' /proc/1/status 2>/dev/null || docker compose -f compose.staging.yaml exec -T backup-worker ps -o gid= -p 1 | tr -d '\r\n ')"
+PID1_UID="$(docker compose -f compose.staging.yaml exec -T backup-worker awk '/^Uid:/ {print $2}' /proc/1/status 2>/dev/null || true)"
+PID1_UID="${PID1_UID//[$'\r\n ']/}"
+PID1_GID="$(docker compose -f compose.staging.yaml exec -T backup-worker awk '/^Gid:/ {print $2}' /proc/1/status 2>/dev/null || true)"
+PID1_GID="${PID1_GID//[$'\r\n ']/}"
+
 echo "backup-worker PID 1 user: UID=$PID1_UID, GID=$PID1_GID"
 if [ "$PID1_UID" != "10001" ] || [ "$PID1_GID" != "10001" ]; then
   echo "FAIL: Expected backup-worker PID 1 to run as 10001:10001, got $PID1_UID:$PID1_GID" >&2
   exit 1
 fi
 
-# Verify configured runtime user shlita
-WORKER_UID="$(docker compose -f compose.staging.yaml exec -T -u shlita backup-worker id -u | tr -d '\r\n')"
-WORKER_GID="$(docker compose -f compose.staging.yaml exec -T -u shlita backup-worker id -g | tr -d '\r\n')"
+# Verify configured runtime user shlita exists and has UID 10001, GID 10001
+WORKER_UID="$(docker compose -f compose.staging.yaml exec -T -u shlita backup-worker id -u 2>/dev/null || true)"
+WORKER_UID="${WORKER_UID//[$'\r\n ']/}"
+WORKER_GID="$(docker compose -f compose.staging.yaml exec -T -u shlita backup-worker id -g 2>/dev/null || true)"
+WORKER_GID="${WORKER_GID//[$'\r\n ']/}"
+
 echo "backup-worker shlita user: UID=$WORKER_UID, GID=$WORKER_GID"
 if [ "$WORKER_UID" != "10001" ] || [ "$WORKER_GID" != "10001" ]; then
   echo "FAIL: Expected backup-worker user 10001:10001, got $WORKER_UID:$WORKER_GID" >&2
@@ -89,6 +96,7 @@ echo "Waiting for backup-worker healthcheck to report healthy..."
 WORKER_STATUS="starting"
 for i in $(seq 1 30); do
   WORKER_STATUS="$(docker inspect --format='{{.State.Health.Status}}' shlita-staging-backup-worker 2>/dev/null || echo 'starting')"
+  WORKER_STATUS="${WORKER_STATUS//[$'\r\n ']/}"
   if [ "$WORKER_STATUS" = "healthy" ]; then
     echo "backup-worker health status: healthy (custom worker check active)"
     break
@@ -136,7 +144,8 @@ docker compose -f compose.staging.yaml exec -T -u shlita backup-worker touch /tm
 echo "Waiting for snapshot creation in /var/backups/shlita-external..."
 SNAPSHOT=""
 for i in $(seq 1 15); do
-  SNAPSHOT="$(docker compose -f compose.staging.yaml exec -T -u shlita backup-worker sh -c 'ls -1t /var/backups/shlita-external/ledger-*.db 2>/dev/null | head -n 1' | tr -d '\r\n')"
+  SNAPSHOT="$(docker compose -f compose.staging.yaml exec -T -u shlita backup-worker sh -c 'ls -1t /var/backups/shlita-external/ledger-*.db 2>/dev/null | head -n 1' || true)"
+  SNAPSHOT="${SNAPSHOT//[$'\r\n ']/}"
   if [ -n "$SNAPSHOT" ]; then
     break
   fi
@@ -151,8 +160,13 @@ fi
 echo "Verified snapshot created: $SNAPSHOT"
 
 # Verify snapshot permissions (0600)
-PERMS="$(docker compose -f compose.staging.yaml exec -T -u shlita backup-worker stat -c '%a' "$SNAPSHOT" 2>/dev/null || docker compose -f compose.staging.yaml exec -T -u shlita backup-worker stat -f '%Lp' "$SNAPSHOT" 2>/dev/null || echo '600' | tr -d '\r\n')"
+PERMS="$(docker compose -f compose.staging.yaml exec -T -u shlita backup-worker stat -c '%a' "$SNAPSHOT" 2>/dev/null || true)"
+PERMS="${PERMS//[$'\r\n ']/}"
 echo "Snapshot file mode: $PERMS"
+if [ "$PERMS" != "600" ]; then
+  echo "FAIL: Expected snapshot permissions 600, got $PERMS" >&2
+  exit 1
+fi
 
 # Restore snapshot into separate database
 RESTORE_DB="/var/backups/shlita-external/restored-compose-drill.db"
@@ -194,7 +208,7 @@ docker compose -f compose.staging.yaml exec -T -u shlita backup-worker touch /tm
 
 FAILED=false
 for i in $(seq 1 15); do
-  WORKER_LOGS="$(docker compose -f compose.staging.yaml logs --tail 30 backup-worker)"
+  WORKER_LOGS="$(docker compose -f compose.staging.yaml logs --tail 30 backup-worker 2>/dev/null || true)"
   if echo "$WORKER_LOGS" | grep -q "CRITICAL: Scheduled ledger backup failed!"; then
     FAILED=true
     break
