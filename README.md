@@ -8,8 +8,8 @@
 [![CI Test Matrix](https://img.shields.io/badge/CI-106%20Passed-14F195?style=flat-square&logo=githubactions&logoColor=white)](https://github.com/XiaoArnav/Shlita/actions/runs/43374212468)
 [![Browser E2E](https://img.shields.io/badge/Playwright-Chromium%20Verified-green?style=flat-square&logo=playwright&logoColor=white)](docs/step-11/DASHBOARD_BROWSER_VERIFICATION.md)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Node%2022-3178C6?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
-[![Static Demo](https://img.shields.io/badge/Vercel-Static%20Demo-000000?style=flat-square&logo=vercel&logoColor=white)](https://shlita.vercel.app/)
-[![Static Mirror](https://img.shields.io/badge/GitHub%20Pages-Static%20Mirror-14F195?style=flat-square&logo=googlechrome&logoColor=white)](https://xiaoarnav.github.io/Shlita/)
+[![Static Demo](https://img.shields.io/badge/Vercel-Static%20Demo-000000?style=flat-square&logo=vercel&logoColor=white)](https://shlita.vercel.app/?demo=1)
+[![Static Mirror](https://img.shields.io/badge/GitHub%20Pages-Static%20Mirror-14F195?style=flat-square&logo=googlechrome&logoColor=white)](https://xiaoarnav.github.io/Shlita/?demo=1)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
 ---
@@ -23,7 +23,7 @@ When agents execute autonomous workflows, granting them direct access to credit 
 Shlita sits between your AI agent and upstream paid APIs (such as Solana RPCs, LLM inference endpoints, or web search services). It intercepts each outbound call, validates provider policies, reserves funds atomically in an ACID-backed SQLite ledger, injects upstream credentials server-side, and records every spending outcome for complete auditability.
 
 ### Start Here
-- ⚡ **Interactive Dashboard Demo**: [shlita.vercel.app](https://shlita.vercel.app/) (static UI preview with sample data)
+- ⚡ **Interactive Dashboard Demo**: [shlita.vercel.app/?demo=1](https://shlita.vercel.app/?demo=1) (static UI preview with sample data)
 - 🚀 **Quickstart Guide**: Jump straight to [Local Quickstart](#quickstart) or [Developer Quickstart](docs/sdk/quickstart.md)
 - 📦 **Agent SDK**: [Install `shlita-sdk`](#agent-sdk-integration) to wrap agent tool calls in spending guardrails
 - 📖 **API Specification**: [OpenAPI Contract (YAML)](docs/api/openapi.yaml)
@@ -45,7 +45,7 @@ flowchart LR
         C1 & C2 & C3 --> D["Two-Phase Commit Reservation"]
         D --> L[("SQLite ACID Ledger")]
     end
-    D -->|"2. Forward with Server Secret"| E["Approved Upstream API<br/>(e.g., Helius, OpenAI)"]
+    D -->|"2. Forward with Server Secret"| E["Approved Upstream API<br/>(e.g., Helius, Tavily)"]
     C -.->|"Policy Violation (403)"| F["Blocked & Logged"]
     E -->|"3. Response & Authoritative Tariff"| G["Committed Ledger Transaction"]
     G --> L
@@ -74,7 +74,7 @@ flowchart LR
 - 🔁 **Financial Idempotency**: Cryptographically fingerprints requests (`idempotencyKey` + payload hash) to prevent duplicate execution or payload mutation on network retries.
 - 🛑 **Operator Freeze Controls**: Operators can instantly freeze individual agents via UI or API. Freeze state persists durably in SQLite across gateway restarts.
 - 📊 **Live Telemetry & Dashboard Streaming**: Operator control dashboard displays live ledger transactions, per-agent budget utilization, and real-time event telemetry that auto-refreshes without manual page reload.
-- 🔑 **Server-Side Secret Injection**: Agent processes receive scoped Shlita API keys. Upstream provider secrets (OpenAI, Helius, Tavily) are injected by the gateway and never exposed to the agent runtime.
+- 🔑 **Server-Side Secret Injection**: Agent processes receive scoped Shlita API keys. Upstream provider secrets (Helius, Tavily) are injected by the gateway and never exposed to the agent runtime. Gemini integration is planned for a follow-up release.
 
 ---
 

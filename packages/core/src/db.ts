@@ -74,6 +74,7 @@ export class SqliteLedger {
   private initSchema(): void {
     if (!this.db) return;
     this.db.exec('PRAGMA journal_mode = WAL;');
+    this.db.exec('PRAGMA busy_timeout = 5000;');
     this.db.exec('PRAGMA foreign_keys = ON;');
 
     // 1. Agents Table
@@ -339,18 +340,24 @@ export class SqliteLedger {
     if (!this.db) throw new Error('Persistent ledger is required for backup.');
     const directory = path.dirname(dest);
     fs.mkdirSync(directory, { recursive: true });
-    if (fs.existsSync(dest)) {
-      fs.rmSync(dest, { force: true });
-    }
-    const escapedDest = dest.replace(/'/g, "''");
-    this.db.exec(`VACUUM INTO '${escapedDest}'`);
-    fs.chmodSync(dest, 0o600);
-    const check = new NodeDatabaseSync(dest, { readOnly: true });
+    const tempDest = `${dest}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
-      const row = check.prepare('PRAGMA integrity_check').get() as { integrity_check: string };
-      if (row.integrity_check !== 'ok') throw new Error('Backup failed integrity check.');
-    } finally {
-      check.close();
+      const escapedTempDest = tempDest.replace(/'/g, "''");
+      this.db.exec(`VACUUM INTO '${escapedTempDest}'`);
+      fs.chmodSync(tempDest, 0o600);
+      const check = new NodeDatabaseSync(tempDest, { readOnly: true });
+      try {
+        const row = check.prepare('PRAGMA integrity_check').get() as { integrity_check: string };
+        if (row.integrity_check !== 'ok') throw new Error('Backup failed integrity check.');
+      } finally {
+        check.close();
+      }
+      fs.renameSync(tempDest, dest);
+    } catch (error) {
+      if (fs.existsSync(tempDest)) {
+        fs.rmSync(tempDest, { force: true });
+      }
+      throw error;
     }
   }
 

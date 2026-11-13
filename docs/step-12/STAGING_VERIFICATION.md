@@ -17,10 +17,11 @@ Step 12 establishes the complete architecture, container infrastructure, locked 
 
 ### Overall Status: SPEC & LOCAL VERIFICATION PASS — LIVE CLOUD DEPLOYMENT BLOCKED
 - **Engineering & Specification:** **PASS** (100% complete)
-- **Local & Container Invariant Tests:** **PASS** (110/110 unit/integration tests pass, 17/17 files)
+- **Local & Container Invariant Tests:** **PASS** (114/114 unit/integration tests pass, 17/17 files)
 - **Chromium Dashboard E2E Browser Test:** **PASS** (Playwright headless Chromium verified)
 - **SDK Consumer Archive Test:** **PASS** (Independent installation outside repository verified)
-- **SQLite Hot Backup (`VACUUM INTO`) & Offline Restore:** **PASS** (Verified with integrity check and record validation)
+- **SQLite Hot Backup (`VACUUM INTO`) & Offline Restore:** **PASS** (Verified with WAL-safe atomic rename, integrity check, failure preservation, and record validation)
+- **Caddy Reverse Proxy & Operator Access Isolation:** **PASS** (Verified CIDR trusted-proxy support, client IP distinction behind proxy, and HTTPS secure cookies)
 - **Ledger Persistence Across Restart:** **PASS** (Verified with durable SQLite database file)
 - **Live Cloud VM & Public DNS/TLS:** **BLOCKED** (Requires maintainer cloud hosting credentials and DNS record provisioning)
 
@@ -63,18 +64,22 @@ Step 12 establishes the complete architecture, container infrastructure, locked 
 ```
 
 ### B. SQLite Backup Snapshot & Independent Restore
-Fixed backup implementation in `packages/core/src/db.ts` to use SQLite's native `VACUUM INTO 'dest'` command:
-1. Performs consistent online snapshot of active WAL-mode database.
-2. Restricts backup file permissions to `0600` (`chmodSync`).
-3. Prunes snapshots older than retention policy (`SHLITA_BACKUP_RETENTION=14`).
-4. Replicates snapshots to off-volume destination (`/var/backups/shlita-external`).
-5. Successfully restored backup into `/tmp/shlita-step12-.../restored-ledger.db` using `restoreLedgerBackup()`.
-6. Verified `PRAGMA integrity_check` returned `ok`.
-7. Verified all agents, operations (`reservedAmountMicroUsdc: 10000`), and audit logs were present and identical in the restored database.
+Implemented WAL-safe backup implementation in `packages/core/src/db.ts` and automated worker in `compose.staging.yaml`:
+1. Performs consistent online snapshot of active WAL-mode database using SQLite native `VACUUM INTO` to a temporary snapshot file.
+2. Runs `PRAGMA integrity_check` on the temporary file before atomically renaming to destination (`fs.renameSync`).
+3. Restricts backup file permissions to `0600` (`chmodSync`).
+4. Preserves last known-good snapshot intact if a subsequent backup fails or destination is unwritable.
+5. Replicates snapshots to off-volume destination (`/var/backups/shlita-external`) owned by container user `shlita` (UID 10001).
+6. Unwritable destination causes `backup-cli.ts` to surface non-zero exit code (verified in automated test).
+7. Successfully restored backup into `/tmp/shlita-step12-.../restored-ledger.db` using `restoreLedgerBackup()`.
+8. Verified `PRAGMA integrity_check` returned `ok`.
+9. Verified all agents, operations (`reservedAmountMicroUsdc: 10000`), and audit logs were present and identical in the restored database.
 
 **Test Output:**
 ```
 ✓ Step 12 — Backup, Prune, and Restore Flow > creates an online backup, verifies integrity, prunes retention, and restores to an independent DB
+✓ Step 12 — Backup, Prune, and Restore Flow > runs backup-cli and restore-cli matching compose staging volume topology
+✓ Step 12 — Backup, Prune, and Restore Flow > surfaces failures on unwritable backup destination and preserves last known-good snapshot
 ```
 
 ### C. Single-Instance Persistence Across Restart
@@ -88,19 +93,38 @@ Fixed backup implementation in `packages/core/src/db.ts` to use SQLite's native 
 **Test Output:**
 ```
 ✓ Step 12 — Persistence & Health Verification Across Restart > preserves ledger records across container/process restart and exposes health checks without credentials
+✓ Step 12 — Persistence & Health Verification Across Restart > triggers circuit breaker trip after consecutive errors and recovers after cooldown
 ```
 
-### D. Full Test Suite & E2E Validation
+### D. Reverse Proxy Ingress & Rate Limit Isolation Behind Caddy
+1. Verified CIDR trusted-proxy support (`172.16.0.0/12`, `10.0.0.0/8`, `127.0.0.1`, `::1`) in `packages/gateway/src/client-address.ts`.
+2. Validated Caddy reverse proxy header pipeline: `X-Forwarded-For`, `X-Real-IP`, `X-Forwarded-Proto: https`, `Host: gateway.staging.shlita.xyz`.
+3. Proved that client IP addresses are isolated: an attacker at `198.51.100.10` making 8 failed operator sign-in attempts is rate limited (HTTP 429), while a legitimate operator at `198.51.100.20` connecting through the exact same Caddy proxy (`172.20.0.2`) signs in with HTTP 200 and is unaffected by the lockout.
+4. Enforced HTTPS secure session cookies (`Secure; HttpOnly; SameSite=Lax`).
+5. Confirmed that direct untrusted clients attempting to forge forwarded headers are identified by their direct peer IP.
+
+**Test Output:**
+```
+✓ Step 12 — Reverse Proxy & Operator Access Behind Caddy > matches trusted proxy CIDR ranges and single IPs for Docker networks
+✓ Step 12 — Reverse Proxy & Operator Access Behind Caddy > distinguishes client IPs behind Caddy for operator login rate limiting and enforces secure cookies
+```
+
+### E. Latency Probe & Monitoring Metrics Separation
+Updated `scripts/staging-smoke-test.mjs` to explicitly differentiate:
+1. **Readiness Latency (`readinessLatency`)**: Samples `/ready` endpoint uncredentialed round-trip latency (database connectivity).
+2. **Proxy Latency (`proxyLatency`)**: Samples `/v1/proxy` authenticated transaction round-trip latency when `SHLITA_TEST_API_KEY` is provided; cleanly omitted with explicit reason when uncredentialed.
+
+### F. Full Test Suite & E2E Validation
 - **Vitest Unit & Integration Matrix:**
   ```
   Test Files  17 passed (17)
-       Tests  110 passed (110)
+       Tests  114 passed (114)
   ```
 - **Playwright Chromium Dashboard Flow:**
   ```
   Running 1 test using 1 worker
-  ✓  dashboard end-to-end browser verification flow (1.9s)
-  1 passed (3.8s)
+  ✓  dashboard end-to-end browser verification flow (2.1s)
+  1 passed (3.1s)
   ```
 - **Independent SDK Consumer Check:**
   ```

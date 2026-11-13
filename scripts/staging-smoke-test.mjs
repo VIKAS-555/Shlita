@@ -42,16 +42,55 @@ async function runProbes() {
   const metricsRes = await fetch(metricsUrl);
   const metricsAvailable = metricsRes.ok;
 
-  // 4. Latency sampling
-  const latencies = [];
+  // 4. Readiness latency sampling (/ready endpoint)
+  const readinessLatencies = [];
   for (let i = 0; i < probeCount; i++) {
     const probe = await measureLatency(readyUrl);
-    latencies.push(probe.durationMs);
+    readinessLatencies.push(probe.durationMs);
   }
 
-  const avgLatencyMs = Number((latencies.reduce((a, b) => a + b, 0) / latencies.length).toFixed(2));
-  const minLatencyMs = Math.min(...latencies);
-  const maxLatencyMs = Math.max(...latencies);
+  const avgReadinessLatencyMs = Number((readinessLatencies.reduce((a, b) => a + b, 0) / readinessLatencies.length).toFixed(2));
+  const minReadinessLatencyMs = Math.min(...readinessLatencies);
+  const maxReadinessLatencyMs = Math.max(...readinessLatencies);
+
+  // 5. Proxy latency sampling (/v1/proxy endpoint, optional with SHLITA_TEST_API_KEY)
+  const testApiKey = process.env.SHLITA_TEST_API_KEY?.trim();
+  let proxyLatencyReport = {
+    status: 'OMITTED_NO_TEST_KEY',
+    description: 'Provide SHLITA_TEST_API_KEY to probe /v1/proxy latency separately from /ready readiness latency',
+  };
+
+  if (testApiKey) {
+    const proxyUrl = `${targetUrl.replace(/\/$/, '')}/v1/proxy`;
+    const proxyLatencies = [];
+    for (let i = 0; i < probeCount; i++) {
+      const start = performance.now();
+      const pRes = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shlita-api-key': testApiKey,
+        },
+        body: JSON.stringify({
+          agentId: 'staging-monitor-agent',
+          vendor: 'api.helius.xyz',
+          method: 'POST',
+          path: '/v0/token-metadata',
+          idempotencyKey: `probe-${Date.now()}-${i}`,
+        }),
+      });
+      const durationMs = Number((performance.now() - start).toFixed(2));
+      proxyLatencies.push(durationMs);
+    }
+    proxyLatencyReport = {
+      status: 'MEASURED',
+      endpoint: '/v1/proxy',
+      samples: probeCount,
+      minMs: Math.min(...proxyLatencies),
+      maxMs: Math.max(...proxyLatencies),
+      avgMs: Number((proxyLatencies.reduce((a, b) => a + b, 0) / proxyLatencies.length).toFixed(2)),
+    };
+  }
 
   const report = {
     target: targetUrl,
@@ -59,12 +98,14 @@ async function runProbes() {
     status: 'HEALTHY',
     health: healthJson,
     metricsEndpoint: metricsAvailable ? 'UP' : 'UNAVAILABLE',
-    latency: {
+    readinessLatency: {
+      endpoint: '/ready',
       samples: probeCount,
-      minMs: minLatencyMs,
-      maxMs: maxLatencyMs,
-      avgMs: avgLatencyMs,
+      minMs: minReadinessLatencyMs,
+      maxMs: maxReadinessLatencyMs,
+      avgMs: avgReadinessLatencyMs,
     },
+    proxyLatency: proxyLatencyReport,
   };
 
   console.log(JSON.stringify(report, null, 2));

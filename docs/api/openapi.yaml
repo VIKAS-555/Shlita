@@ -10,7 +10,7 @@ info:
     This document does not describe a public hosted gateway. Call the gateway you run.
 servers:
   - url: https://gateway.staging.shlita.xyz
-    description: Staging persistent HTTPS gateway (locked staging mode)
+    description: Planned staging gateway endpoint (locked staging mode; live public DNS/TLS pending cloud host provisioning)
   - url: http://127.0.0.1:4000
     description: Local gateway development instance
 tags:

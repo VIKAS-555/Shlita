@@ -18,6 +18,7 @@ import { execSync } from 'node:child_process';
 import { describe, it, expect } from 'vitest';
 import { assessSecurityConfig } from '../../packages/gateway/src/security-config.js';
 import { createGatewayApp } from '../../packages/gateway/src/app.js';
+import { isTrustedProxy, clientIdentity } from '../../packages/gateway/src/client-address.js';
 import { createPolicyEngine } from '../../packages/core/src/index.js';
 import { restoreLedgerBackup, pruneBackupFiles } from '../../packages/core/src/backup.js';
 import type { SpendingPolicy } from '../../packages/core/src/types.js';
@@ -245,6 +246,73 @@ describe('Step 12 — Backup, Prune, and Restore Flow', () => {
 
     fs.rmSync(dir, { recursive: true, force: true });
   });
+
+  it('surfaces failures on unwritable backup destination and preserves last known-good snapshot', async () => {
+    const dir = tempDir();
+    const dbPath = path.join(dir, 'ledger.db');
+    const backupDir = path.join(dir, 'backups');
+    fs.mkdirSync(backupDir, { recursive: true });
+
+    const engine = createPolicyEngine(dbPath);
+    engine.registerAgent(
+      {
+        agentId: 'agent-good-snapshot',
+        allowedVendors: ['api.helius.xyz'],
+        maxPerCallMicroUsdc: 50_000n,
+        periodBudgetMicroUsdc: 200_000n,
+        periodSeconds: 3600,
+        circuitBreaker: { maxConsecutiveErrors: 3, maxCallsPerMinute: 20 },
+      },
+      { rawApiKey: 'shlt_snapshot_key_00000001', ownerOrg: STAGING_ORG }
+    );
+    engine.close();
+
+    // 1. Create a known-good snapshot
+    const knownGoodSnapshot = path.join(backupDir, 'ledger-known-good.db');
+    const engineForBackup = createPolicyEngine(dbPath);
+    await engineForBackup.backupTo(knownGoodSnapshot);
+    expect(fs.existsSync(knownGoodSnapshot)).toBe(true);
+    const originalMtime = fs.statSync(knownGoodSnapshot).mtimeMs;
+    const originalSize = fs.statSync(knownGoodSnapshot).size;
+
+    // 2. An unwritable directory destination causes backup-cli to fail with non-zero exit code
+    const invalidDir = path.join(dir, 'unwritable-as-file');
+    fs.writeFileSync(invalidDir, 'i-am-a-file-not-a-directory');
+
+    let cliFailed = false;
+    try {
+      execSync('npx tsx packages/gateway/src/backup-cli.ts', {
+        env: {
+          ...process.env,
+          SHLITA_DB_PATH: dbPath,
+          SHLITA_BACKUP_DIR: path.join(invalidDir, 'sub'),
+        },
+        stdio: 'pipe',
+      });
+    } catch (err: unknown) {
+      cliFailed = true;
+      const error = err as { status: number; stderr: Buffer };
+      expect(error.status).not.toBe(0);
+      expect(error.stderr.toString()).toContain('ENOTDIR');
+    }
+    expect(cliFailed).toBe(true);
+
+    // 3. Verify the existing known-good snapshot was preserved intact
+    expect(fs.existsSync(knownGoodSnapshot)).toBe(true);
+    expect(fs.statSync(knownGoodSnapshot).mtimeMs).toBe(originalMtime);
+    expect(fs.statSync(knownGoodSnapshot).size).toBe(originalSize);
+
+    // 4. Verify that restoring the known-good snapshot succeeds completely
+    const restoredPath = path.join(dir, 'restored-after-failure.db');
+    restoreLedgerBackup(knownGoodSnapshot, restoredPath, false);
+    expect(fs.existsSync(restoredPath)).toBe(true);
+    const restoredEngine = createPolicyEngine(restoredPath);
+    expect(restoredEngine.getAgentOwnerOrg('agent-good-snapshot')).toBe(STAGING_ORG);
+    restoredEngine.close();
+
+    engineForBackup.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
 });
 
 describe('Step 12 — Persistence & Health Verification Across Restart', () => {
@@ -392,6 +460,124 @@ describe('Step 12 — Persistence & Health Verification Across Restart', () => {
     expect(r3Json.reason).toBe('CIRCUIT_BREAKER_TRIPPED');
     expect(r3Json.allowed).toBe(false);
     expect(callCount).toBe(beforeCalls); // Verified upstream was not called!
+
+    engine.close();
+  });
+});
+
+describe('Step 12 — Reverse Proxy & Operator Access Behind Caddy', () => {
+  it('matches trusted proxy CIDR ranges and single IPs for Docker networks', () => {
+    const proxies = ['127.0.0.1', '::1', '172.16.0.0/12', '10.0.0.0/8'];
+
+    // Local loopback
+    expect(isTrustedProxy('127.0.0.1', proxies)).toBe(true);
+    expect(isTrustedProxy('::1', proxies)).toBe(true);
+
+    // Docker bridge network IP (within 172.16.0.0/12)
+    expect(isTrustedProxy('172.17.0.2', proxies)).toBe(true);
+    expect(isTrustedProxy('172.20.0.15', proxies)).toBe(true);
+    expect(isTrustedProxy('172.31.255.254', proxies)).toBe(true);
+
+    // Other private network (10.0.0.0/8)
+    expect(isTrustedProxy('10.42.0.1', proxies)).toBe(true);
+
+    // Untrusted public IPs
+    expect(isTrustedProxy('198.51.100.1', proxies)).toBe(false);
+    expect(isTrustedProxy('203.0.113.50', proxies)).toBe(false);
+    expect(isTrustedProxy('172.32.0.1', proxies)).toBe(false); // Outside /12
+
+    // Client identity extraction through trusted proxy
+    const extracted = clientIdentity({
+      remoteAddress: '172.20.0.2',
+      forwardedFor: '198.51.100.42',
+      realIp: '198.51.100.42',
+      trustedProxies: proxies,
+    });
+    expect(extracted).toBe('198.51.100.42');
+
+    // Untrusted direct client attempting to spoof forwarded headers
+    const spoofed = clientIdentity({
+      remoteAddress: '198.51.100.99',
+      forwardedFor: '1.2.3.4',
+      realIp: '1.2.3.4',
+      trustedProxies: proxies,
+    });
+    expect(spoofed).toBe('198.51.100.99');
+  });
+
+  it('distinguishes client IPs behind Caddy for operator login rate limiting and enforces secure cookies', async () => {
+    const engine = createPolicyEngine();
+    const app = createGatewayApp(engine, undefined, {
+      operators: [{ key: STRONG_KEY, ownerOrg: STAGING_ORG }],
+      secureCookies: true,
+      trustedProxies: ['127.0.0.1', '::1', '172.16.0.0/12', '10.0.0.0/8'],
+      publicOrigin: 'https://gateway.staging.shlita.xyz',
+      remoteAddress: (header) => header('x-mock-remote-addr') || '172.20.0.2',
+    });
+
+    const caddyProxyIp = '172.20.0.2';
+    const clientAIp = '198.51.100.10';
+    const clientBIp = '198.51.100.20';
+
+    // 1. Client A sends 8 invalid operator sign-in attempts through Caddy (maxFailures = 8)
+    for (let i = 0; i < 8; i++) {
+      const res = await app.request('/v1/session', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-mock-remote-addr': caddyProxyIp,
+          'x-real-ip': clientAIp,
+          'x-forwarded-for': clientAIp,
+          'x-forwarded-proto': 'https',
+          host: 'gateway.staging.shlita.xyz',
+        },
+        body: JSON.stringify({ operatorKey: 'invalid-operator-secret' }),
+      });
+      expect(res.status).toBe(403);
+    }
+
+    // 2. Client A attempt #9 is rate-limited (429)
+    const clientALocked = await app.request('/v1/session', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-mock-remote-addr': caddyProxyIp,
+        'x-real-ip': clientAIp,
+        'x-forwarded-for': clientAIp,
+        'x-forwarded-proto': 'https',
+        host: 'gateway.staging.shlita.xyz',
+      },
+      body: JSON.stringify({ operatorKey: STRONG_KEY }),
+    });
+    expect(clientALocked.status).toBe(429);
+    const lockedJson = await clientALocked.json();
+    expect(lockedJson.error).toBe('RATE_LIMITED');
+
+    // 3. Client B connects through the exact same Caddy proxy with valid key and succeeds
+    const clientBOk = await app.request('/v1/session', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-mock-remote-addr': caddyProxyIp,
+        'x-real-ip': clientBIp,
+        'x-forwarded-for': clientBIp,
+        'x-forwarded-proto': 'https',
+        host: 'gateway.staging.shlita.xyz',
+      },
+      body: JSON.stringify({ operatorKey: STRONG_KEY }),
+    });
+    expect(clientBOk.status).toBe(200);
+    const clientBJson = await clientBOk.json();
+    expect(clientBJson.authenticated).toBe(true);
+    expect(clientBJson.organizationId).toBe(STAGING_ORG);
+    expect(clientBJson.csrfToken).toBeDefined();
+
+    // 4. Verify cookie has Secure; HttpOnly flag set
+    const setCookie = clientBOk.headers.get('set-cookie');
+    expect(setCookie).toBeDefined();
+    expect(setCookie).toContain('Secure');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('SameSite=Lax');
 
     engine.close();
   });

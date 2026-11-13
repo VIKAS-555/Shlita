@@ -29,4 +29,7 @@ try {
   process.exitCode = 1;
 } finally {
   engine.close();
+  if (process.exitCode && process.exitCode !== 0) {
+    process.exit(process.exitCode);
+  }
 }

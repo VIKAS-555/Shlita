@@ -17,7 +17,7 @@ services:
       SHLITA_BACKUP_DIR: /var/lib/shlita/backups
       SHLITA_BACKUP_RETENTION: "14"
       SHLITA_PUBLIC_ORIGIN: ${SHLITA_PUBLIC_ORIGIN:-https://gateway.staging.shlita.xyz}
-      SHLITA_TRUSTED_PROXIES: "127.0.0.1,::1"
+      SHLITA_TRUSTED_PROXIES: "127.0.0.1,::1,172.16.0.0/12,10.0.0.0/8"
       HELIUS_API_KEY: ${HELIUS_API_KEY:-}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       SOLANA_NETWORK: devnet
@@ -57,7 +57,7 @@ services:
     image: ${SHLITA_IMAGE:-ghcr.io/xiaoarnav/shlita-gateway:staging}
     container_name: shlita-staging-backup-worker
     restart: unless-stopped
-    entrypoint:
+    command:
       - /bin/sh
       - -c
       - |
@@ -65,8 +65,11 @@ services:
         while true; do
           sleep 86400
           echo "Running scheduled ledger backup..."
-          node dist/packages/gateway/src/backup-cli.js || true
-          echo "Scheduled backup completed."
+          if ! node dist/packages/gateway/src/backup-cli.js; then
+            echo "CRITICAL: Scheduled ledger backup failed!" >&2
+          else
+            echo "Scheduled backup completed."
+          fi
         done
     environment:
       SHLITA_DB_PATH: /var/lib/shlita/ledger.db
