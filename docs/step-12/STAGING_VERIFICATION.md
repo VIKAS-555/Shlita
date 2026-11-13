@@ -19,7 +19,7 @@ Step 12 establishes the complete architecture, container infrastructure, locked 
 
 ### Overall Status: SPEC & LOCAL VERIFICATION PASS — LIVE CLOUD DEPLOYMENT BLOCKED
 - **Engineering & Specification:** **PASS** (100% complete)
-- **Local & Container Invariant Tests:** **PASS** (126/126 unit/integration tests pass across 20 test files)
+- **Local & Container Invariant Tests:** **PASS** (128/128 unit/integration tests pass across 20 test files)
 - **Chromium Dashboard E2E Browser Test:** **PASS** (Playwright headless Chromium verified)
 - **SDK Consumer Archive Test:** **PASS** (Independent installation outside repository verified)
 - **SQLite Hot Backup (`VACUUM INTO`) & Offline Restore:** **PASS** (Verified with WAL-safe atomic rename, integrity check, failure preservation, and record validation)
@@ -47,7 +47,7 @@ Step 12 establishes the complete architecture, container infrastructure, locked 
 | **9. Automated Backup Worker** | `compose.staging.yaml` sidecar running `node dist/packages/gateway/src/backup-cli.js` with direct volume mount | ✅ PASS | Verified writable external backup mount, `VACUUM INTO`, retention pruning |
 | **10. Backup Restoration Drill** | `packages/core/src/backup.ts` `restoreLedgerBackup()` into independent database | ✅ PASS | Verified CLI and API restore in `tests/step-12/staging.deployment.test.ts` |
 | **11. Circuit Breaker Alert Drill** | Gateway returns 502 on upstream error, trips breaker on threshold, returns 403 `CIRCUIT_BREAKER_TRIPPED` | ✅ PASS | Verified in `tests/step-12/staging.deployment.test.ts` (test 4) |
-| **12. Unit & Integration Suite** | 126 tests across 20 test files | ✅ PASS | `npm test` exit code 0 |
+| **12. Unit & Integration Suite** | 128 tests across 20 test files | ✅ PASS | `npm test` exit code 0 |
 | **13. Browser Dashboard E2E** | Playwright Chromium headless test | ✅ PASS | `npm run test:browser` exit code 0 |
 | **14. SDK External Consumer** | External package unpack and run test | ✅ PASS | `node scripts/sdk-consumer-check.mjs` exit code 0 |
 | **15. Compose Backup Isolation** | `scripts/verify-compose-backup-worker.sh` unique namespace & fail-closed preflight | ✅ PASS | Verified in CI; volume survival across success/failure |
@@ -163,24 +163,33 @@ Hardened `scripts/staging-smoke-test.mjs` against false `HEALTHY` results:
 ✓ Step 12 — Staging Smoke Test Regression > succeeds with a test key and reports separate readiness and proxy timings
 ```
 
-### F. Live Acceptance Check Automation & Event Loop Stall Fix
+### F. Live Acceptance Check Automation, TLS Strict Verification & Event Loop Stall Fix
 Automated the 4 live staging acceptance checks in `scripts/verify-live-staging.sh` and added regression tests in `tests/step-12/live.acceptance.test.ts`:
-1. **Event Loop Stall Root Cause Diagnosis:** In initial testing, executing the mock HTTP server and synchronous `execSync` in the same test runner process caused Node.js event loop starvation — `execSync` blocked the single Node.js thread, preventing the mock HTTP server from processing curl requests from the subshell script and resulting in a test stall.
-2. **Minimal Non-Blocking Fix:** Refactored shell execution to asynchronous `execAsync` (`util.promisify(exec)`) with an explicit 5000ms timeout, unblocking the Node.js event loop so HTTP requests are served in milliseconds.
-3. **Graceful Resource Cleanup:** Guaranteed that the mock HTTP server and child processes are closed in `finally` blocks on success, assertion failure, or timeout.
-4. **Targeted Verification:** Confirmed both tests pass in < 400ms (`npx vitest run tests/step-12/live.acceptance.test.ts --reporter=verbose`), verifying that unprovisioned environments produce clean `BLOCKED` verdicts with maintainer ownership, while reachable HTTP 200 endpoints pass only `LIVE-HTTPS-01`.
+1. **Strict TLS Enforcement & Removal of `curl -k`:**
+   - Removed insecure `-k` flag from curl requests.
+   - Enforced protocol verification: if target URL is plain `http://...`, `LIVE-HTTPS-01` is marked `FAILED` immediately, preventing plain HTTP 200 from passing the TLS check.
+   - Requires normal TLS certificate validation against system trust store or specified custom CA bundle via `--cacert` (or `SHLITA_CACERT`).
+   - Self-signed certificates without trusted CA bundle are rejected with TLS verification failure.
+2. **Hermetic DNS Independence:**
+   - Decoupled missing-DNS validation from public network resolvers via `--dns-status nxdomain` (or `SHLITA_DNS_STATUS=nxdomain`) and RFC 2606 / 6761 reserved `.invalid` domains, preventing ISP NXDOMAIN hijacking from flaking test runs.
+3. **Event Loop Stall Root Cause Diagnosis:** In initial testing, executing the mock HTTP server and synchronous `execSync` in the same test runner process caused Node.js event loop starvation — `execSync` blocked the single Node.js thread, preventing the mock HTTP server from processing curl requests from the subshell script and resulting in a test stall.
+4. **Minimal Non-Blocking Fix:** Refactored shell execution to asynchronous `execAsync` (`util.promisify(exec)`) with an explicit 5000ms timeout, unblocking the Node.js event loop so HTTP requests are served in milliseconds.
+5. **Graceful Resource Cleanup:** Guaranteed that the mock HTTP server and child processes are closed in `finally` blocks on success, assertion failure, or timeout.
+6. **Targeted Verification:** Confirmed all 4 tests pass in < 500ms (`npx vitest run tests/step-12/live.acceptance.test.ts --reporter=verbose`), verifying hermetic DNS blocking, plain HTTP 200 rejection, unverified TLS certificate rejection, and valid HTTPS acceptance.
 
 **Test Output:**
 ```
-✓ Step 12 — Live Acceptance Check Automation > reports all 4 live checks as BLOCKED with clear blockers when run against unprovisioned host
-✓ Step 12 — Live Acceptance Check Automation > detects live HTTPS status correctly when target endpoint responds with HTTP 200
+✓ Step 12 — Live Acceptance Check Automation > reports all 4 live checks as BLOCKED independently of public DNS when DNS is unresolvable
+✓ Step 12 — Live Acceptance Check Automation > rejects plain HTTP 200 and fails LIVE-HTTPS-01 (HTTPS with TLS verification required)
+✓ Step 12 — Live Acceptance Check Automation > strictly rejects unverified TLS certificates when curl -k is omitted
+✓ Step 12 — Live Acceptance Check Automation > passes LIVE-HTTPS-01 when valid HTTPS and verified certificate return HTTP 200
 ```
 
 ### G. Full Test Suite & E2E Validation
 - **Vitest Unit & Integration Matrix:**
   ```
   Test Files  20 passed (20)
-       Tests  126 passed (126)
+       Tests  128 passed (128)
   ```
 - **Playwright Chromium Dashboard Flow:**
   ```
