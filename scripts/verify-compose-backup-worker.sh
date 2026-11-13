@@ -142,6 +142,7 @@ docker compose -f compose.staging.yaml exec -T -u shlita gateway node -e '
     maxPerCallMicroUsdc: 50000n,
     periodBudgetMicroUsdc: 200000n,
     periodSeconds: 3600,
+    circuitBreaker: { maxConsecutiveErrors: 3, maxCallsPerMinute: 20 },
   }, { rawApiKey: "key-compose-worker-01", ownerOrg: "pilot-staging-alpha" });
   engine.ledger.recordOperation({
     operationId: "op_worker_drill_999",
