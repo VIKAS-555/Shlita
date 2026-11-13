@@ -41,11 +41,23 @@
 
 ---
 
+## Dashboard Browser E2E Verification Resolved in Step 11 (1 test)
+
+Resolved in Step 11 via Playwright v1.65.0 and Chromium. Verified in [GitHub Actions run 43374212468](https://github.com/XiaoArnav/Shlita/actions/runs/43374212468) using the command `npm run test:browser`.
+
+The suite (`tests/step-11/dashboard.browser.test.ts`) records one passing Playwright Chromium test covering:
+1. Operator sign-in and session cookie initialization
+2. Agent enrollment and single-view API key display
+3. Live spend and telemetry updates without reloading
+4. Freeze persistence after reload
+5. Sign-out and return to login screen
+
+---
+
 ## Remaining Gaps (not addressed in Step 11)
 
 | Gap | Reason Not Addressed | Recommended Action |
 |---|---|---|
-| Browser-level dashboard E2E | Playwright not available on host | Add `@playwright/test` to devDependencies in Step 12; write 5-step smoke test |
 | Funded Solana settlement reproduction | Missing `subscriptions_program.so` binary | Provide binary or build from source (program-v0.5.0) |
 | Multi-process concurrent budget enforcement | Requires running two Node processes simultaneously | Integration test using `spawn`; add in Step 12+ |
 | Automated database backup + restore | No restore test exists | Add `scripts/backup-restore-verify.ts` in Step 12 |

@@ -59,11 +59,13 @@ Three contradictions found in existing docs (see `CLAIM_EVIDENCE_REGISTER.md`):
 - Docker base image: Alpine → `node:22-bookworm-slim`
 - Health endpoint: `/healthz` → `/health` and `/ready`
 
-### P8 — Browser E2E Test (SHOULD DO)
-Playwright should be added to `devDependencies` and a basic E2E test should be added to CI that:
-1. Starts the gateway (or uses the staging URL)
-2. Opens the dashboard in a headless browser
-3. Verifies operator sign-in and agent enrollment
+### P8 — Browser E2E Test (COMPLETED IN STEP 11)
+Resolved in Step 11 via Playwright and Chromium. Verified in [GitHub Actions run 43374212468](https://github.com/XiaoArnav/Shlita/actions/runs/43374212468) using the command `npm run test:browser`. It records one passing Playwright Chromium test covering:
+1. Operator sign-in and session cookie initialization
+2. Agent enrollment and single-view API key issuance
+3. Live spend and telemetry updates without reloading
+4. Freeze persistence after reload
+5. Sign-out and return to login screen
 
 ### P9 — `/metrics` OpenAPI Documentation (LOW PRIORITY)
 The `/metrics` endpoint exists in the gateway but is not in `docs/api/openapi.yaml`.
@@ -82,7 +84,8 @@ The `/metrics` endpoint exists in the gateway but is not in `docs/api/openapi.ya
 | Financial invariants: all 8 implemented and tested | ✅ Ready |
 | SDK: `shlita-sdk` installable from tarball | ✅ Ready |
 | TypeScript builds clean | ✅ Ready |
-| 98 tests pass | ✅ Ready |
+| 106 automated tests pass + 1 Playwright browser E2E test | ✅ Ready (Step 11) |
+| Dashboard browser E2E verification (Chromium) | ✅ Ready (Step 11, Run 43374212468) |
 
 ---
 
@@ -95,6 +98,6 @@ The `/metrics` endpoint exists in the gateway but is not in `docs/api/openapi.ya
 | Persistent operator key (secret) | 🔴 YES |
 | Persistent volume | 🔴 YES |
 | Health monitoring | ⚠️ SHOULD HAVE |
-| Browser E2E test | ⚠️ SHOULD HAVE |
+| Browser E2E test | ✅ COMPLETED in Step 11 (Run 43374212468) |
 | Documentation error fixes | ⚠️ SHOULD HAVE |
 | Funded Solana test reproduction | ✅ Not required for Step 12 (staging can use simulation mode) |
