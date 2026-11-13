@@ -3,11 +3,13 @@
 **Document Reference:** `docs/step-12/STAGING_VERIFICATION.md`  
 **Parent Milestone:** Step 12 — Persistent HTTPS Staging Deployment  
 **Upstream Target:** `XiaoArnav/Shlita:main`  
-**Base Commit (Step 11 Merged):** `158e06265f74a5ebdf683ad1290db8339e064930` (PR #12 merged)  
-**Collaborator Author:** `VIKAS-555 <vikas.tech0007@gmail.com>`  
-**Date:** 2026-11-13  
-**Target Staging URL:** `https://gateway.staging.shlita.xyz`  
-**Target Container Image:** `ghcr.io/xiaoarnav/shlita-gateway:staging`  
+**Base Commit (PR #16 Merged):** `f5ba699188e1ca5c4bda607fa446a8608e9b345c` (PR #16 merged to `main`)
+**Baseline CI Run:** [Run #43457191871](https://github.com/XiaoArnav/Shlita/actions/runs/43457191871)
+**Collaborator Author:** `VIKAS-555 <vikas.tech0007@gmail.com>`
+**Date:** 2026-11-13
+**Target Staging URL:** `https://gateway.staging.shlita.xyz`
+**Target Container Image:** `ghcr.io/xiaoarnav/shlita:f5ba699188e1ca5c4bda607fa446a8608e9b345c` (`ghcr.io/xiaoarnav/shlita:staging`)
+**Staging Deployment ID:** `7769737563`
 
 ---
 
@@ -17,14 +19,16 @@ Step 12 establishes the complete architecture, container infrastructure, locked 
 
 ### Overall Status: SPEC & LOCAL VERIFICATION PASS — LIVE CLOUD DEPLOYMENT BLOCKED
 - **Engineering & Specification:** **PASS** (100% complete)
-- **Local & Container Invariant Tests:** **PASS** (118/118 unit/integration tests pass, 18/18 files)
+- **Local & Container Invariant Tests:** **PASS** (126/126 unit/integration tests pass across 20 test files)
 - **Chromium Dashboard E2E Browser Test:** **PASS** (Playwright headless Chromium verified)
 - **SDK Consumer Archive Test:** **PASS** (Independent installation outside repository verified)
 - **SQLite Hot Backup (`VACUUM INTO`) & Offline Restore:** **PASS** (Verified with WAL-safe atomic rename, integrity check, failure preservation, and record validation)
+- **Compose Backup Worker Isolation Drill:** **PASS** (Verified with unique project namespace, preflight fail-closed check, and volume survival across success and failure)
 - **Caddy Reverse Proxy & Operator Access Isolation:** **PASS** (Verified CIDR trusted-proxy support, client IP distinction behind proxy, and HTTPS secure cookies)
 - **Smoke-Test Probe & Regression Hardening:** **PASS** (Verified false-healthy elimination on 503/non-2xx, status identification, and latency metric separation)
+- **Live Acceptance Check Automation:** **PASS** (Verified asynchronous execution in `tests/step-12/live.acceptance.test.ts` and `scripts/verify-live-staging.sh`)
 - **Ledger Persistence Across Restart:** **PASS** (Verified with durable SQLite database file)
-- **Live Cloud VM & Public DNS/TLS:** **BLOCKED** (Requires maintainer cloud hosting credentials and DNS record provisioning)
+- **Live Cloud VM & Public DNS/TLS (4 Acceptance Checks):** **BLOCKED** (Requires maintainer cloud hosting credentials, public DNS delegation, and staging secrets)
 
 ---
 
@@ -43,9 +47,11 @@ Step 12 establishes the complete architecture, container infrastructure, locked 
 | **9. Automated Backup Worker** | `compose.staging.yaml` sidecar running `node dist/packages/gateway/src/backup-cli.js` with direct volume mount | ✅ PASS | Verified writable external backup mount, `VACUUM INTO`, retention pruning |
 | **10. Backup Restoration Drill** | `packages/core/src/backup.ts` `restoreLedgerBackup()` into independent database | ✅ PASS | Verified CLI and API restore in `tests/step-12/staging.deployment.test.ts` |
 | **11. Circuit Breaker Alert Drill** | Gateway returns 502 on upstream error, trips breaker on threshold, returns 403 `CIRCUIT_BREAKER_TRIPPED` | ✅ PASS | Verified in `tests/step-12/staging.deployment.test.ts` (test 4) |
-| **12. Unit & Integration Suite** | 118 tests across 18 test files | ✅ PASS | `npm test` exit code 0 |
+| **12. Unit & Integration Suite** | 126 tests across 20 test files | ✅ PASS | `npm test` exit code 0 |
 | **13. Browser Dashboard E2E** | Playwright Chromium headless test | ✅ PASS | `npm run test:browser` exit code 0 |
 | **14. SDK External Consumer** | External package unpack and run test | ✅ PASS | `node scripts/sdk-consumer-check.mjs` exit code 0 |
+| **15. Compose Backup Isolation** | `scripts/verify-compose-backup-worker.sh` unique namespace & fail-closed preflight | ✅ PASS | Verified in CI; volume survival across success/failure |
+| **16. Live Acceptance Automation** | `scripts/verify-live-staging.sh` & `tests/step-12/live.acceptance.test.ts` | ✅ PASS | Non-blocking asynchronous probe runner |
 
 ---
 
@@ -157,17 +163,30 @@ Hardened `scripts/staging-smoke-test.mjs` against false `HEALTHY` results:
 ✓ Step 12 — Staging Smoke Test Regression > succeeds with a test key and reports separate readiness and proxy timings
 ```
 
-### F. Full Test Suite & E2E Validation
+### F. Live Acceptance Check Automation & Event Loop Stall Fix
+Automated the 4 live staging acceptance checks in `scripts/verify-live-staging.sh` and added regression tests in `tests/step-12/live.acceptance.test.ts`:
+1. **Event Loop Stall Root Cause Diagnosis:** In initial testing, executing the mock HTTP server and synchronous `execSync` in the same test runner process caused Node.js event loop starvation — `execSync` blocked the single Node.js thread, preventing the mock HTTP server from processing curl requests from the subshell script and resulting in a test stall.
+2. **Minimal Non-Blocking Fix:** Refactored shell execution to asynchronous `execAsync` (`util.promisify(exec)`) with an explicit 5000ms timeout, unblocking the Node.js event loop so HTTP requests are served in milliseconds.
+3. **Graceful Resource Cleanup:** Guaranteed that the mock HTTP server and child processes are closed in `finally` blocks on success, assertion failure, or timeout.
+4. **Targeted Verification:** Confirmed both tests pass in < 400ms (`npx vitest run tests/step-12/live.acceptance.test.ts --reporter=verbose`), verifying that unprovisioned environments produce clean `BLOCKED` verdicts with maintainer ownership, while reachable HTTP 200 endpoints pass only `LIVE-HTTPS-01`.
+
+**Test Output:**
+```
+✓ Step 12 — Live Acceptance Check Automation > reports all 4 live checks as BLOCKED with clear blockers when run against unprovisioned host
+✓ Step 12 — Live Acceptance Check Automation > detects live HTTPS status correctly when target endpoint responds with HTTP 200
+```
+
+### G. Full Test Suite & E2E Validation
 - **Vitest Unit & Integration Matrix:**
   ```
-  Test Files  19 passed (19)
-       Tests  124 passed (124)
+  Test Files  20 passed (20)
+       Tests  126 passed (126)
   ```
 - **Playwright Chromium Dashboard Flow:**
   ```
   Running 1 test using 1 worker
   ✓  dashboard end-to-end browser verification flow (2.1s)
-  1 passed (3.1s)
+  1 passed (2.9s)
   ```
 - **Independent SDK Consumer Check:**
   ```
@@ -188,10 +207,10 @@ As documented in Step 11 prerequisites (`STEP_12_PREREQUISITES.md`) and per Step
 | :--- | :--- | :--- | :--- |
 | **BLOCKER-HOST-01** | Cloud VM Provisioning | No remote server to run `compose.staging.yaml` | Maintainer provisions Linux host (e.g. AWS EC2, Fly.io, Railway, or Hetzner VPS) |
 | **BLOCKER-DNS-01** | Public DNS Delegation | `gateway.staging.shlita.xyz` does not resolve | Add DNS A/AAAA record pointing `gateway.staging.shlita.xyz` to VM public IP |
-| **BLOCKER-SECRET-01** | Stable Staging Operator Key | Staging secret store unpopulated | Add GitHub Actions secret `SHLITA_STAGING_OPERATOR_KEY` (>= 32 random hex characters) |
+| **BLOCKER-SECRET-01** | Stable Staging Operator Key | Staging secret store unpopulated | Add GitHub Actions secret `SHLITA_STAGING_OPERATOR_KEY` (>= 32 random hex characters) and `SHLITA_ALERT_WEBHOOK_URL` |
 
-### Live Staging Completion Criteria & Status (Hold on Step 13):
-Per the maintainer specification, Step 12 live staging remains marked as **BLOCKED** and **Step 13 remains on hold** until maintainer provisioning allows completing the four mandatory live checks:
+### Live Staging Acceptance Criteria & Status (Hold on Step 13):
+Per the maintainer specification, Step 12 live staging remains marked as **BLOCKED**, Step 12 is **NOT YET COMPLETE**, and **Step 13 remains strictly on hold** until maintainer provisioning allows completing the four mandatory live checks:
 
 | Live Check ID | Verification Requirement | Status | Required Input / Blocker | Owner |
 | :--- | :--- | :--- | :--- | :--- |
@@ -200,10 +219,54 @@ Per the maintainer specification, Step 12 live staging remains marked as **BLOCK
 | **LIVE-ALERT-01** | Run controlled staging outage and confirm outage alert and recovery notification reach configured destination | ⚠️ **BLOCKED** | `BLOCKER-SECRET-01` (`SHLITA_ALERT_WEBHOOK_URL` / alert sink) | Maintainer (`XiaoArnav`) |
 | **LIVE-RESTORE-01** | Restore snapshot produced by scheduled worker on staging host into separate database; verify integrity and operation ID/amount | ⚠️ **BLOCKED** | `BLOCKER-HOST-01` (Host scheduled backup worker execution) | Maintainer (`XiaoArnav`) |
 
-1. **External Public HTTPS Verification (LIVE-HTTPS-01):** Verify valid TLS handshake and `GET /ready` HTTP 200 from outside the host (`gateway.staging.shlita.xyz`).
-2. **Redeploy Persistence (LIVE-PERSIST-01):** Write a sandbox ledger record, redeploy the container stack, and verify that the exact same record persists.
-3. **Outage Alert & Recovery Delivery (LIVE-ALERT-01):** Induce a simulated gateway outage and confirm both the outage alert and recovery notification reach the configured notification destination.
-4. **Host Scheduled Backup Restore (LIVE-RESTORE-01):** Restore an actual snapshot generated by the scheduled backup worker on that host into a separate database, verifying integrity and record preservation.
+### Detailed Execution Logs & Evidence:
+
+1. **External Public HTTPS Verification (LIVE-HTTPS-01):**
+   - **Target URL:** `https://gateway.staging.shlita.xyz/ready`
+   - **Tested Command:** `curl -Iv https://gateway.staging.shlita.xyz/ready`
+   - **DNS Verification:** `nslookup gateway.staging.shlita.xyz 8.8.8.8`
+   - **Timestamp:** `2026-11-13T16:01:00Z`
+   - **Result:** ⚠️ **BLOCKED** (`NXDOMAIN` — Could not resolve host `gateway.staging.shlita.xyz`).
+   - **Missing Inputs:** `BLOCKER-DNS-01` (DNS A/AAAA record missing) and `BLOCKER-HOST-01` (Cloud VM unprovisioned).
+
+2. **Redeploy Persistence (LIVE-PERSIST-01):**
+   - **Evaluation:** Evaluates SQLite storage durability across container lifecycle.
+   - **Host Execution Procedure:**
+     ```bash
+     # 1. Commit sandbox operation through public gateway
+     curl -s -X POST https://gateway.staging.shlita.xyz/v1/proxy \
+       -H "Content-Type: application/json" \
+       -H "X-Shlita-Api-Key: $AGENT_API_KEY" \
+       -d '{"agentId":"live-agent","vendor":"api.helius.xyz","method":"POST","path":"/v0/token-metadata","idempotencyKey":"live-persist-01"}'
+     # 2. Redeploy container stack using same persistent volume
+     docker compose -f compose.staging.yaml down
+     docker compose -f compose.staging.yaml up -d
+     # 3. Verify operation record persists with exact amount
+     ```
+   - **Status:** ⚠️ **BLOCKED** on `BLOCKER-HOST-01`.
+
+3. **Outage Alert & Recovery Delivery (LIVE-ALERT-01):**
+   - **Evaluation:** Verifies SRE monitoring probe delivery to webhook sink.
+   - **Host Execution Procedure:**
+     ```bash
+     # 1. Induce outage by stopping gateway
+     docker compose -f compose.staging.yaml stop gateway
+     # 2. Confirm outage alert received at $SHLITA_ALERT_WEBHOOK_URL
+     # 3. Restore gateway service
+     docker compose -f compose.staging.yaml start gateway
+     # 4. Confirm recovery notification received at $SHLITA_ALERT_WEBHOOK_URL
+     ```
+   - **Status:** ⚠️ **BLOCKED** on `BLOCKER-SECRET-01` and `BLOCKER-HOST-01`.
+
+4. **Host Scheduled Backup Restore (LIVE-RESTORE-01):**
+   - **Evaluation:** Verifies that a scheduled snapshot produced on the host restores cleanly.
+   - **Host Execution Procedure:**
+     ```bash
+     LATEST_SNAPSHOT="$(ls -1t /var/backups/shlita-external/ledger-*.db | head -n 1)"
+     node dist/packages/gateway/src/restore-cli.js "$LATEST_SNAPSHOT" /tmp/host-restored-verify.db
+     # Verify PRAGMA integrity_check == ok and verify recorded operations
+     ```
+   - **Status:** ⚠️ **BLOCKED** on `BLOCKER-HOST-01`.
 
 ### Immediate Deployment Once Host is Provisioned:
 ```bash
@@ -212,6 +275,8 @@ git clone https://github.com/XiaoArnav/Shlita.git /opt/shlita
 cd /opt/shlita
 cp .env.example .env # Set SHLITA_OPERATOR_KEY, SHLITA_OPERATOR_ORG, and SHLITA_STAGING_DOMAIN
 docker compose -f compose.staging.yaml up -d
+./scripts/verify-live-staging.sh
+```
 ./scripts/staging-smoke-test.mjs
 ```
 
