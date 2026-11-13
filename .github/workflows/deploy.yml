@@ -160,6 +160,11 @@ jobs:
           docker rm -f shlita-step5
           docker volume rm shlita-step5
 
+      - name: Verify Compose backup worker service
+        run: |
+          export SHLITA_IMAGE="shlita:step5"
+          bash -x scripts/verify-compose-backup-worker.sh
+
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment:
@@ -173,11 +178,12 @@ jobs:
         uses: actions/deploy-pages@v4
 
   staging:
-    name: Verify & Deploy Staging
+    name: Build & Publish Staging Container Image (GHCR)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment:
       name: staging
-      url: https://xiaoarnav.github.io/Shlita/
+      # Note: Staging gateway runs via Docker Compose on a persistent cloud host.
+      # Image publication to GHCR is automated here; live HTTPS deployment requires host provisioning.
     runs-on: ubuntu-latest
     needs: [build, image]
     steps:

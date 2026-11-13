@@ -9,6 +9,37 @@ export function normalizeAddress(value: string | undefined): string | null {
   return null;
 }
 
+function ipv4ToInt(ip: string): number | null {
+  if (!IPV4.test(ip)) return null;
+  const parts = ip.split('.').map(Number);
+  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+}
+
+export function isTrustedProxy(peer: string, trustedProxies: readonly string[]): boolean {
+  const normalizedPeer = normalizeAddress(peer);
+  if (!normalizedPeer) return false;
+  for (const item of trustedProxies) {
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+    if (trimmed.includes('/')) {
+      const [range, bitsStr] = trimmed.split('/');
+      const bits = Number(bitsStr);
+      if (Number.isInteger(bits) && bits >= 0 && bits <= 32) {
+        const netInt = ipv4ToInt(range);
+        const ipInt = ipv4ToInt(normalizedPeer);
+        if (netInt !== null && ipInt !== null) {
+          const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+          if ((ipInt & mask) === (netInt & mask)) return true;
+        }
+      }
+    } else {
+      const normalizedItem = normalizeAddress(trimmed);
+      if (normalizedItem && normalizedItem === normalizedPeer) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Forwarded headers are client-controlled unless the immediate peer is a
  * proxy this process was explicitly configured to trust.
@@ -20,17 +51,16 @@ export function clientIdentity(input: {
   trustedProxies: readonly string[];
 }): string {
   const peer = normalizeAddress(input.remoteAddress) ?? 'local';
-  const trusted = new Set(input.trustedProxies.map((item) => normalizeAddress(item) ?? item));
-  if (!trusted.has(peer)) return peer;
+  if (!isTrustedProxy(peer, input.trustedProxies)) return peer;
 
   const hops = (input.forwardedFor ?? '')
     .split(',')
     .map((hop) => normalizeAddress(hop))
     .filter((hop): hop is string => Boolean(hop));
   for (let index = hops.length - 1; index >= 0; index -= 1) {
-    if (!trusted.has(hops[index])) return hops[index];
+    if (!isTrustedProxy(hops[index], input.trustedProxies)) return hops[index];
   }
   const real = normalizeAddress(input.realIp);
-  if (real && !trusted.has(real)) return real;
+  if (real && !isTrustedProxy(real, input.trustedProxies)) return real;
   return peer;
 }

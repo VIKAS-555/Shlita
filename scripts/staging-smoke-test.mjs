@@ -8,19 +8,21 @@
  * 3. Measures HTTP round-trip latency over N probes
  * 4. Outputs structured JSON telemetry metrics
  */
-const targetUrl = process.env.STAGING_GATEWAY_URL || 'http://127.0.0.1:4000';
-const probeCount = Number(process.env.PROBE_COUNT || '5');
+import { fileURLToPath } from 'node:url';
 
-console.log(`[Shlita Monitor] Probing target: ${targetUrl} (Probes: ${probeCount})`);
-
-async function measureLatency(url) {
+export async function measureLatency(url) {
   const start = performance.now();
   const res = await fetch(url);
   const durationMs = Number((performance.now() - start).toFixed(2));
   return { status: res.status, ok: res.ok, durationMs };
 }
 
-async function runProbes() {
+export async function runProbes(options = {}) {
+  const targetUrl = options.targetUrl || process.env.STAGING_GATEWAY_URL || 'http://127.0.0.1:4000';
+  const probeCount = Number(options.probeCount ?? process.env.PROBE_COUNT ?? '5');
+
+  console.log(`[Shlita Monitor] Probing target: ${targetUrl} (Probes: ${probeCount})`);
+
   const healthUrl = `${targetUrl.replace(/\/$/, '')}/health`;
   const readyUrl = `${targetUrl.replace(/\/$/, '')}/ready`;
   const metricsUrl = `${targetUrl.replace(/\/$/, '')}/metrics`;
@@ -28,30 +30,75 @@ async function runProbes() {
   // 1. Health check
   const healthRes = await fetch(healthUrl);
   if (!healthRes.ok) {
-    throw new Error(`Health check failed with HTTP ${healthRes.status}`);
+    throw new Error(`Health check failed for /health with HTTP ${healthRes.status}`);
   }
   const healthJson = await healthRes.json();
 
   // 2. Readiness check
   const readyRes = await fetch(readyUrl);
   if (!readyRes.ok) {
-    throw new Error(`Readiness check failed with HTTP ${readyRes.status}`);
+    throw new Error(`Readiness check failed for /ready with HTTP ${readyRes.status}`);
   }
 
   // 3. Metrics scrape
   const metricsRes = await fetch(metricsUrl);
   const metricsAvailable = metricsRes.ok;
 
-  // 4. Latency sampling
-  const latencies = [];
+  // 4. Readiness latency sampling (/ready endpoint)
+  const readinessLatencies = [];
   for (let i = 0; i < probeCount; i++) {
     const probe = await measureLatency(readyUrl);
-    latencies.push(probe.durationMs);
+    if (!probe.ok) {
+      throw new Error(`Readiness probe sample failed for /ready with HTTP ${probe.status}`);
+    }
+    readinessLatencies.push(probe.durationMs);
   }
 
-  const avgLatencyMs = Number((latencies.reduce((a, b) => a + b, 0) / latencies.length).toFixed(2));
-  const minLatencyMs = Math.min(...latencies);
-  const maxLatencyMs = Math.max(...latencies);
+  const avgReadinessLatencyMs = Number((readinessLatencies.reduce((a, b) => a + b, 0) / readinessLatencies.length).toFixed(2));
+  const minReadinessLatencyMs = Math.min(...readinessLatencies);
+  const maxReadinessLatencyMs = Math.max(...readinessLatencies);
+
+  // 5. Proxy latency sampling (/v1/proxy endpoint, optional with SHLITA_TEST_API_KEY)
+  const testApiKey = (options.testApiKey !== undefined ? options.testApiKey : process.env.SHLITA_TEST_API_KEY)?.trim();
+  let proxyLatencyReport = {
+    status: 'OMITTED_NO_TEST_KEY',
+    description: 'Provide SHLITA_TEST_API_KEY to probe /v1/proxy latency separately from /ready readiness latency',
+  };
+
+  if (testApiKey) {
+    const proxyUrl = `${targetUrl.replace(/\/$/, '')}/v1/proxy`;
+    const proxyLatencies = [];
+    for (let i = 0; i < probeCount; i++) {
+      const start = performance.now();
+      const pRes = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shlita-api-key': testApiKey,
+        },
+        body: JSON.stringify({
+          agentId: 'staging-monitor-agent',
+          vendor: 'api.helius.xyz',
+          method: 'POST',
+          path: '/v0/token-metadata',
+          idempotencyKey: `probe-${Date.now()}-${i}`,
+        }),
+      });
+      const durationMs = Number((performance.now() - start).toFixed(2));
+      if (!pRes.ok) {
+        throw new Error(`Proxy probe sample failed for /v1/proxy with HTTP ${pRes.status}`);
+      }
+      proxyLatencies.push(durationMs);
+    }
+    proxyLatencyReport = {
+      status: 'MEASURED',
+      endpoint: '/v1/proxy',
+      samples: probeCount,
+      minMs: Math.min(...proxyLatencies),
+      maxMs: Math.max(...proxyLatencies),
+      avgMs: Number((proxyLatencies.reduce((a, b) => a + b, 0) / proxyLatencies.length).toFixed(2)),
+    };
+  }
 
   const report = {
     target: targetUrl,
@@ -59,19 +106,24 @@ async function runProbes() {
     status: 'HEALTHY',
     health: healthJson,
     metricsEndpoint: metricsAvailable ? 'UP' : 'UNAVAILABLE',
-    latency: {
+    readinessLatency: {
+      endpoint: '/ready',
       samples: probeCount,
-      minMs: minLatencyMs,
-      maxMs: maxLatencyMs,
-      avgMs: avgLatencyMs,
+      minMs: minReadinessLatencyMs,
+      maxMs: maxReadinessLatencyMs,
+      avgMs: avgReadinessLatencyMs,
     },
+    proxyLatency: proxyLatencyReport,
   };
 
   console.log(JSON.stringify(report, null, 2));
   return report;
 }
 
-runProbes().catch((err) => {
-  console.error('[Shlita Monitor] Probe Failed:', err.message);
-  process.exit(1);
-});
+const isDirectRun = Boolean(process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]);
+if (isDirectRun) {
+  runProbes().catch((err) => {
+    console.error(`[Shlita Monitor] Probe Failed: ${err.message}`);
+    process.exit(1);
+  });
+}
