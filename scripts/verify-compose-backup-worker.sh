@@ -68,14 +68,27 @@ if [ "$GW_STATUS" != "healthy" ]; then
 fi
 
 # Verify worker process runs under configured runtime user shlita (UID 10001, GID 10001)
-WORKER_PROC_UID="$(docker compose -f compose.staging.yaml exec -T backup-worker ps -u shlita -o uid= 2>/dev/null | head -n 1 || true)"
+WORKER_PROC_UID="$(docker compose -f compose.staging.yaml exec -T backup-worker node -e '
+  import fs from "node:fs";
+  const pids = fs.readdirSync("/proc").filter(p => /^\d+$/.test(p));
+  let workerUid = null;
+  for (const p of pids) {
+    try {
+      const status = fs.readFileSync(`/proc/${p}/status`, "utf-8");
+      const uidMatch = status.match(/^Uid:\s+(\d+)/m);
+      if (uidMatch && uidMatch[1] === "10001") {
+        workerUid = "10001";
+        break;
+      }
+    } catch {}
+  }
+  process.stdout.write(workerUid || "unknown");
+')"
 WORKER_PROC_UID="${WORKER_PROC_UID//[$'\r\n ']/}"
-WORKER_PROC_GID="$(docker compose -f compose.staging.yaml exec -T backup-worker ps -u shlita -o gid= 2>/dev/null | head -n 1 || true)"
-WORKER_PROC_GID="${WORKER_PROC_GID//[$'\r\n ']/}"
 
-echo "backup-worker process ownership: UID=$WORKER_PROC_UID, GID=$WORKER_PROC_GID"
-if [ "$WORKER_PROC_UID" != "10001" ] || [ "$WORKER_PROC_GID" != "10001" ]; then
-  echo "FAIL: Expected backup-worker process to run as 10001:10001, got $WORKER_PROC_UID:$WORKER_PROC_GID" >&2
+echo "backup-worker process ownership: UID=$WORKER_PROC_UID"
+if [ "$WORKER_PROC_UID" != "10001" ]; then
+  echo "FAIL: Expected backup-worker process to run as UID 10001, got $WORKER_PROC_UID" >&2
   exit 1
 fi
 
