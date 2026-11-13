@@ -131,14 +131,18 @@ npm start
 Open [http://127.0.0.1:4000](http://127.0.0.1:4000) in your browser:
 - In development, an operator key is generated automatically in `.shlita/` if not set.
 - Add `?demo=1` to explore the dashboard with pre-loaded mock balance samples.
-- To configure an explicit operator key, start with `SHLITA_OPERATOR_KEY="your-32-char-secret-operator-key" npm start`.
+- To configure an explicit operator key, provide both `SHLITA_OPERATOR_KEY` and `SHLITA_OPERATOR_ORG`:
+  ```bash
+  SHLITA_OPERATOR_KEY="your-32-char-secret-operator-key" SHLITA_OPERATOR_ORG="org-pilot" npm start
+  ```
+  `SHLITA_OPERATOR_ORG` defines the organization boundary for the operator: it partitions multi-tenant agent ownership, scopes dashboard access and policy mutations strictly to that organization's agents, and tags all financial audit records.
 
 ### 4. Run via Docker Compose
 A single container backed by a persistent SQLite volume is the supported production deployment model:
 
 ```bash
 # Start gateway on port 4010 with persistent volume
-SHLITA_OPERATOR_KEY="your-32-char-secret-operator-key" docker compose up -d
+SHLITA_OPERATOR_KEY="your-32-char-secret-operator-key" SHLITA_OPERATOR_ORG="org-pilot" docker compose up -d
 ```
 
 Access the gateway at [http://127.0.0.1:4010](http://127.0.0.1:4010). SQLite database and backups are stored in the `shlita-data` volume mapped to `/var/lib/shlita`.
