@@ -163,16 +163,7 @@ jobs:
       - name: Verify Compose backup worker service
         run: |
           export SHLITA_IMAGE="shlita:step5"
-          set +e
-          bash -x scripts/verify-compose-backup-worker.sh > /tmp/worker.log 2>&1
-          status=$?
-          set -e
-          if [ $status -ne 0 ]; then
-            cat /tmp/worker.log
-            ERR_MSG="$(tail -n 25 /tmp/worker.log | tr '\n' ' | ')"
-            echo "::error title=WorkerFailure::${ERR_MSG}"
-            exit $status
-          fi
+          bash -x scripts/verify-compose-backup-worker.sh
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

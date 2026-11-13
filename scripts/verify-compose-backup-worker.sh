@@ -133,7 +133,7 @@ fi
 
 # Seed disposable ledger with committed operation
 echo "Seeding disposable ledger with committed financial operation..."
-docker compose -f compose.staging.yaml exec -T -u shlita gateway node -e '
+OP_ID="$(docker compose -f compose.staging.yaml exec -T -u shlita gateway node -e '
   const { createPolicyEngine } = await import("./dist/packages/core/src/index.js");
   const engine = createPolicyEngine("/var/lib/shlita/ledger.db");
   engine.registerAgent({
@@ -144,20 +144,36 @@ docker compose -f compose.staging.yaml exec -T -u shlita gateway node -e '
     periodSeconds: 3600,
     circuitBreaker: { maxConsecutiveErrors: 3, maxCallsPerMinute: 20 },
   }, { rawApiKey: "key-compose-worker-01", ownerOrg: "pilot-staging-alpha" });
-  engine.ledger.recordOperation({
-    operationId: "op_worker_drill_999",
+
+  const claimed = engine.claimExecution({
     agentId: "compose-worker-agent",
-    ownerOrg: "pilot-staging-alpha",
     vendor: "api.helius.xyz",
     method: "POST",
     path: "/v0/token-metadata",
+    fingerprint: "worker-fingerprint-999",
     idempotencyKey: "worker-drill-key-999",
+    estimatedCostMicroUsdc: 15000n,
     reservedAmountMicroUsdc: 15000n,
-    outcome: "committed",
+    timestamp: Date.now(),
   });
+  if (claimed.kind !== "execute") throw new Error("claimExecution failed: " + JSON.stringify(claimed));
+
+  const finished = engine.finishExecution(claimed.operationId, {
+    type: "succeeded",
+    httpStatus: 200,
+    result: { result: "ok" },
+  });
+  if (!finished.ok) throw new Error("finishExecution failed: " + JSON.stringify(finished));
+
   engine.close();
-  console.log("Disposable ledger seeded successfully.");
-'
+  process.stdout.write(claimed.operationId);
+')"
+OP_ID="${OP_ID//[$'\r\n ']/}"
+echo "Seeded operation ID: $OP_ID"
+if [ -z "$OP_ID" ]; then
+  echo "FAIL: Operation ID was not returned during seeding" >&2
+  exit 1
+fi
 
 # Trigger prompt backup cycle using scheduled job code path
 echo "Triggering prompt backup cycle via /tmp/trigger-backup..."
@@ -197,10 +213,11 @@ echo "Restoring snapshot into $RESTORE_DB via restore-cli..."
 docker compose -f compose.staging.yaml exec -T -u shlita backup-worker node dist/packages/gateway/src/restore-cli.js "$SNAPSHOT" "$RESTORE_DB"
 
 # Verify PRAGMA integrity_check, operation ID, and recorded amount
-docker compose -f compose.staging.yaml exec -T -u shlita -e RESTORE_DB="$RESTORE_DB" backup-worker node -e '
+docker compose -f compose.staging.yaml exec -T -u shlita -e RESTORE_DB="$RESTORE_DB" -e EXPECTED_OP_ID="$OP_ID" backup-worker node -e '
   const { DatabaseSync } = await import("node:sqlite");
   const { createPolicyEngine } = await import("./dist/packages/core/src/index.js");
 
+  const expectedOpId = process.env.EXPECTED_OP_ID;
   const dbPath = process.env.RESTORE_DB;
   const rawDb = new DatabaseSync(dbPath, { readOnly: true });
   const row = rawDb.prepare("PRAGMA integrity_check").get();
@@ -212,15 +229,15 @@ docker compose -f compose.staging.yaml exec -T -u shlita -e RESTORE_DB="$RESTORE
 
   const engine = createPolicyEngine(dbPath);
   const ops = engine.listOrganizationOperations("pilot-staging-alpha");
-  const targetOp = ops.find(o => o.operationId === "op_worker_drill_999");
+  const targetOp = ops.find(o => o.operationId === expectedOpId);
   if (!targetOp) {
-    throw new Error("Operation op_worker_drill_999 not found in restored database");
+    throw new Error("Operation " + expectedOpId + " not found in restored database");
   }
   if (targetOp.reservedAmountMicroUsdc !== "15000") {
     throw new Error("Recorded amount mismatch: expected 15000, got " + targetOp.reservedAmountMicroUsdc);
   }
   engine.close();
-  console.log("Verified restored operation: op_worker_drill_999 with 15000 micro-USDC");
+  console.log("Verified restored operation: " + expectedOpId + " with 15000 micro-USDC");
 '
 
 # Exercise failed backup scenario
