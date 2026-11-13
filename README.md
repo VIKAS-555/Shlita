@@ -1,257 +1,239 @@
 # Shlita (שְׁלִיטָה)
 
-> **Autonomous AI Agent Financial Control Plane & Policy Proxy on Solana Rails.**
+> **Spending policy gateway for autonomous AI agents.**<br/>
+> Enforce budgets, control vendor access, and audit every spending decision before payment occurs.
 
-![Shlita - Financial Firewall for Autonomous AI Agents on Solana](assets/thumbnail.jpg)
+![Shlita - Financial Firewall for Autonomous AI Agents](assets/thumbnail.jpg)
 
-[![Vercel](https://img.shields.io/badge/Vercel-shlita.vercel.app-000000?style=flat-square&logo=vercel&logoColor=white)](https://shlita.vercel.app/)
-[![GitHub Pages](https://img.shields.io/badge/Mirror-xiaoarnav.github.io%2FShlita-14F195?style=flat-square&logo=googlechrome&logoColor=white)](https://xiaoarnav.github.io/Shlita/)
-[![YouTube Demo](https://img.shields.io/badge/YouTube-Video%20Demo-FF0000?style=flat-square&logo=youtube&logoColor=white)](https://youtu.be/o5vHfcUjDJE)
-[![Solana Subscriptions](https://img.shields.io/badge/Solana-Subscriptions%20PDA-7C3AED?style=flat-square&logo=solana)](https://solana.com)
-[![Tests](https://img.shields.io/badge/Tests-npm%20test-success?style=flat-square)](https://github.com/XiaoArnav/Shlita/actions)
+[![CI Test Matrix](https://img.shields.io/badge/CI-106%20Passed-14F195?style=flat-square&logo=githubactions&logoColor=white)](https://github.com/XiaoArnav/Shlita/actions/runs/43374212468)
+[![Browser E2E](https://img.shields.io/badge/Playwright-Chromium%20Verified-green?style=flat-square&logo=playwright&logoColor=white)](docs/step-11/DASHBOARD_BROWSER_VERIFICATION.md)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Node%2022-3178C6?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
+[![Static Demo](https://img.shields.io/badge/Vercel-Static%20Demo-000000?style=flat-square&logo=vercel&logoColor=white)](https://shlita.vercel.app/)
+[![Static Mirror](https://img.shields.io/badge/GitHub%20Pages-Static%20Mirror-14F195?style=flat-square&logo=googlechrome&logoColor=white)](https://xiaoarnav.github.io/Shlita/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
-- ⚡ **Static demo (Vercel)**: [https://shlita.vercel.app/](https://shlita.vercel.app/) serves the built interface only. It does not host the ledger.
-- 🌐 **Static mirror (GitHub Pages)**: [https://xiaoarnav.github.io/Shlita/](https://xiaoarnav.github.io/Shlita/) is the same static build.
+---
 
-The financial control plane is the gateway process plus its SQLite file. `npm start` serves the built interface and `/v1` on the same origin, so the operator session cookie stays on that host. The operator key is not bundled into the frontend. A hosted static site is not a persistent ledger, and this repository does not deploy the gateway.
-- 📺 **Full Video Walkthrough**: [Watch on YouTube (https://youtu.be/o5vHfcUjDJE)](https://youtu.be/o5vHfcUjDJE)
-- 📖 **DEV.to Deep Dive Writeup**: [Why We Built a Financial Firewall for Autonomous AI Agents on Solana](https://dev.to/polymath_arnav/why-we-built-a-financial-firewall-for-autonomous-ai-agents-on-solana-acid-reservations-zero-key-4mfe)
+## What is Shlita?
+
+**Shlita** (Hebrew for *"Governance & Control"*) is a local financial policy proxy and operator control plane built for autonomous AI agents, tool-calling LLMs, and multi-agent systems.
+
+When agents execute autonomous workflows, granting them direct access to credit cards or raw crypto wallets creates severe operational risks: recursive tool loops, prompt injection attacks, and concurrency race conditions that can drain budgets in seconds.
+
+Shlita sits between your AI agent and upstream paid APIs (such as Solana RPCs, LLM inference endpoints, or web search services). It intercepts each outbound call, validates provider policies, reserves funds atomically in an ACID-backed SQLite ledger, injects upstream credentials server-side, and records every spending outcome for complete auditability.
+
+### Start Here
+- ⚡ **Interactive Dashboard Demo**: [shlita.vercel.app](https://shlita.vercel.app/) (static UI preview with sample data)
+- 🚀 **Quickstart Guide**: Jump straight to [Local Quickstart](#quickstart) or [Developer Quickstart](docs/sdk/quickstart.md)
+- 📦 **Agent SDK**: [Install `shlita-sdk`](#agent-sdk-integration) to wrap agent tool calls in spending guardrails
+- 📖 **API Specification**: [OpenAPI Contract (YAML)](docs/api/openapi.yaml)
+- 📺 **Video Walkthrough**: [Watch the Demo on YouTube](https://youtu.be/o5vHfcUjDJE)
+- 📝 **Architecture Deep Dive**: [Read on DEV.to](https://dev.to/polymath_arnav/why-we-built-a-financial-firewall-for-autonomous-ai-agents-on-solana-acid-reservations-zero-key-4mfe)
 
 ---
 
-## 1. The Problem: The AI Agent Financial Paradox
+## How It Works
 
-Autonomous AI agents (trading bots, research agents, code reviewers, DevOps responders) require continuous access to paid services:
-- **Inference APIs**: OpenAI, Anthropic, DeepSeek
-- **Solana RPCs**: Helius, QuickNode, Triton
-- **Web Search & Data**: Tavily, Exa, Brave Search
-
-Giving an autonomous AI agent raw wallet private keys or unlimited corporate cards is financial suicide:
-- **Prompt Injection & Phishing**: Adversaries trick agents into transacting with malicious drainer endpoints.
-- **Recursive Hallucination Loops**: Tool-use loops trigger thousands of calls per minute, draining budgets in seconds.
-- **Concurrency Race Conditions**: Parallel subagents spend the same balance simultaneously, breaking periodic budgets.
-- **Manual Approvals Kill Autonomy**: Requiring human sign-off on every $0.02 micro-transaction renders agents useless.
-
----
-
-## 2. The Solution: Shlita
-
-**Shlita** (Hebrew for *"Governance & Control"*) is an inline financial policy proxy and operator control plane that enforces deterministic boundaries on AI agent spending before on-chain settlement on Solana:
-
-- 🛡️ **Sub-Millisecond Policy Checks**: Intercepts requests and enforces per-call spending caps (<$0.05 max per call).
-- 🔒 **Atomic Budget Reservations**: Concurrency-safe two-phase commit reservation protocol (`evaluateAndReserve` ➔ `commitReservation` / `rollbackReservation`) backed by a durable ACID SQLite ledger to eliminate race-condition overspending under parallel bursts.
-- 💳 **Server-Owned Tariffs**: Reconciles authoritative provider tariffs (`helius`, `tavily`) rather than trusting client-reported costs.
-- 🔄 **Periodic Budget Rollovers**: Hard periodic limits (daily/monthly caps in USDC base units) with automatic period rollovers.
-- 🌐 **Vendor Whitelisting & SSRF Firewall**: Restricts agents to verified domains (`api.helius.xyz`, `api.tavily.com`) and strictly blocks SSRF attacks (loopback, RFC 1918 private subnets, cloud metadata `169.254.169.254`, userinfo URLs, and non-443 ports).
-- ⚡ **Rolling Anomaly Circuit Breaker**: Detects high-frequency call bursts (>6 calls/min) or error cascades and automatically freezes the agent.
-- ⛓️ **Canonical Solana Subscriptions Protocol**: Directly integrates official Solana Subscriptions program (`De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44`) with deterministic `SubscriptionAuthority` PDAs (`['SubscriptionAuthority', user, mint]`), `FixedDelegation` PDAs, and honest pending/confirmed settlement states.
-- 🔑 **Agent Credential Boundary**: Dedicated agent API keys with hashed key storage; upstream vendor secrets are injected server-side and never exposed to the agent runtime.
-- 🎨 **Enterprise Command Center**: Dark/light theme dashboard with real-time budget utilization rings, live gateway daemon status indicator (`Gateway Live (:4000)`), telemetry, and 1-click circuit reset.
-
----
-
-## 3. Architecture & Request Lifecycle
-
-```
-┌─────────────────────┐
-│ Autonomous AI Agent │ (Executes LLM workflows & tool calls)
-└──────────┬──────────┘
-           │ 1. POST /v1/proxy (Vendor, Path, Body, x-shlita-api-key)
-           ▼
-┌────────────────────────────────────────────────────────┐
-│                 Shlita Policy Gateway                  │
-│                                                        │
-│  [Durable Ledger & Rules Engine in packages/core]:     │
-│  ✔ Validate Shlita Agent API Key (SHA-256 hash)?       │
-│  ✔ SSRF & Origin Validation (HTTPS, 443, no metadata)? │
-│  ✔ Calculate Authoritative Tariff Quote (Micro-USDC)?  │
-│  ✔ Atomic Database Reservation Lock (Two-Phase Commit)?│
-│  ✔ Operator Freeze Active?                             │
-│  ✔ Circuit Breaker Status?                             │
-│  ✔ Within Per-Request Cap? (< $0.05 USDC)              │
-│  ✔ Rolling Call Burst Loop Detector (< 6 calls/min)?   │
-│  ✔ Within Periodic Budget? (< $150.00 USDC)            │
-└──────────┬───────────────────────────┬─────────────────┘
-           │ 2. Approved               │ 3. Policy Violation / Tripped
-           ▼                           ▼
- ┌───────────────────────────┐       ┌───────────────────────────────┐
- │ Real Upstream Vendor API  │       │ HTTP 403 Policy Violation     │
- │ + Injected Provider Secret│       │ Circuit Breaker Trips & Alert │
- │ + Solana Devnet Settlement│       │ Streamed to Operator UI       │
- │ State: SETTLEMENT_PENDING │       └───────────────────────────────┘
- └───────────────────────────┘
+```mermaid
+flowchart LR
+    A["AI Agent Workflow"] -->|"1. POST /v1/proxy<br/>(API Key, Vendor, Payload)"| B["Shlita Policy Gateway"]
+    subgraph Gateway["Shlita Financial Control Plane"]
+        B --> C{"Policy Evaluation"}
+        C -->|"Allowlist Check"| C1["SSRF Firewall (Port 443 only)"]
+        C -->|"Budget Check"| C2["Per-Call Cap & Period Budget"]
+        C -->|"Loop Detection"| C3["Anomaly Breaker & Freeze State"]
+        C1 & C2 & C3 --> D["Two-Phase Commit Reservation"]
+        D --> L[("SQLite ACID Ledger")]
+    end
+    D -->|"2. Forward with Server Secret"| E["Approved Upstream API<br/>(e.g., Helius, OpenAI)"]
+    C -.->|"Policy Violation (403)"| F["Blocked & Logged"]
+    E -->|"3. Response & Authoritative Tariff"| G["Committed Ledger Transaction"]
+    G --> L
 ```
 
-### Honest Transaction State Model
-
-Shlita enforces strict truth-in-advertising for all transaction states:
+### Transaction Lifecycle States
 
 | Lifecycle State | Meaning |
 | :--- | :--- |
-| `REQUEST_RECEIVED` | Request accepted by gateway; no approval implied. |
-| `POLICY_REJECTED` | A rule denied the request; no vendor call or payment occurs. |
-| `BUDGET_RESERVED` | Funds/budget held atomically for this idempotency key in SQLite ledger. |
-| `VENDOR_SUCCEEDED` / `FAILED` | Provider response and billable usage recorded server-side. |
-| `SETTLEMENT_PENDING` | Payment instruction prepared or submitted to Solana RPC; awaiting confirmation. |
-| `SETTLEMENT_CONFIRMED` | RPC confirms a real transaction signature on the configured cluster. |
-| `SETTLEMENT_FAILED` | Payment failed or needs reconciliation. **Never falsely displays SETTLED.** |
+| `REQUEST_RECEIVED` | Request accepted by gateway; authentication validated. |
+| `POLICY_REJECTED` | A rule denied the request (e.g. unapproved vendor, over budget); no upstream call is made. |
+| `BUDGET_RESERVED` | Budget atomically locked in SQLite WAL ledger before upstream dispatch. |
+| `VENDOR_SUCCEEDED` / `FAILED` | Provider response and billable tariff recorded server-side. |
+| `ACCOUNTING_COMMITTED` | Ledger hold permanently reconciled to actual tariff cost. |
+| `ACCOUNTING_ROLLED_BACK` | Reservation released back to agent budget if provider fails or times out. |
+| `SETTLEMENT_PENDING` | Payment instruction prepared for Solana RPC; awaiting network confirmation. |
+| `SETTLEMENT_CONFIRMED` | Real transaction signature confirmed on the configured Solana cluster. |
 
 ---
 
-## 4. Codebase Structure
+## Core Features
 
-```
-shlita/
-├── packages/
-│   ├── core/                  # Policy engine and durable SQLite ledger
-│   ├── gateway/               # Hono HTTP API Gateway (/v1/proxy, /v1/agents, audit logs, SSRF guard)
-│   ├── sdk/                   # Installable agent and operator clients (shlita-sdk)
-│   └── solana/                # Canonical Solana Subscriptions Protocol (Program De1egAF...vR44)
-├── src/                       # React 18 + Vite + Tailwind v4 + Recharts UI Dashboard
-├── demo/
-│   └── run-demo.ts            # Terminal attack & circuit breaker simulation
-├── tests/                     # Vitest suite, including the external SDK install
-├── examples/                  # Runnable agent, policy, idempotency, and tool examples
-├── docs/api/openapi.yaml      # HTTP contract for the routes the gateway implements
-├── GLOSSARY.md                # Ubiquitous domain language
-└── docs/adr/                  # Architectural Decision Records (ADR 0001)
-```
+- 🛡️ **Per-Call & Period Spending Limits**: Enforces hard per-request ceilings (e.g., max $0.05 USDC per call) and rolling periodic budgets (daily/monthly limits) with deterministic automatic rollover.
+- 🔒 **Atomic Two-Phase Reservations**: SQLite WAL-mode ledger implements concurrency-safe budget reservations (`evaluateAndReserve` ➔ `commitReservation` / `rollbackReservation`), eliminating race conditions under parallel agent bursts.
+- 🌐 **Vendor Allowlisting & SSRF Firewall**: Confines agents to explicitly approved provider hostnames (e.g., `api.helius.xyz`). Strictly blocks loopback, private subnets (RFC 1918), link-local metadata (`169.254.169.254`), non-443 ports, and userinfo embeds.
+- 🔁 **Financial Idempotency**: Cryptographically fingerprints requests (`idempotencyKey` + payload hash) to prevent duplicate execution or payload mutation on network retries.
+- 🛑 **Operator Freeze Controls**: Operators can instantly freeze individual agents via UI or API. Freeze state persists durably in SQLite across gateway restarts.
+- 📊 **Live Telemetry & Dashboard Streaming**: Operator control dashboard displays live ledger transactions, per-agent budget utilization, and real-time event telemetry that auto-refreshes without manual page reload.
+- 🔑 **Server-Side Secret Injection**: Agent processes receive scoped Shlita API keys. Upstream provider secrets (OpenAI, Helius, Tavily) are injected by the gateway and never exposed to the agent runtime.
 
 ---
 
-## 5. Quickstart
+## Verification & Engineering Baseline
+
+Shlita’s behavior is independently audited and backed by reproducible automated tests in CI:
+
+| Capability / Surface | Verified Status | Tested Environment & Evidence |
+|---|---|---|
+| **Automated Test Matrix** | ✅ **106 tests passed** (16 files) | Node 24.22.1 in Ubuntu CI & macOS ([CI Run 43374212468](https://github.com/XiaoArnav/Shlita/actions/runs/43374212468)) |
+| **Dashboard Browser E2E** | ✅ **Verified in Chromium** | Playwright v1.65.0 headless browser test ([DASHBOARD_BROWSER_VERIFICATION.md](docs/step-11/DASHBOARD_BROWSER_VERIFICATION.md)) |
+| **SDK External Install** | ✅ **Verified Tarball Install** | External temporary consumer project outside repository ([`sdk.consumer.test.ts`](tests/sdk.consumer.test.ts)) |
+| **Docker Persistence** | ✅ **Verified WAL Persistence** | Container stop/start test preserves state on `/var/lib/shlita` volume |
+| **Static UI Mirrors** | 🌐 **Static Frontend Only** | [Vercel Demo](https://shlita.vercel.app/) and [GitHub Pages](https://xiaoarnav.github.io/Shlita/) (pre-rendered UI, no live backend) |
+| **Local Gateway Runtime** | 💻 **Supported Entry Point** | `npm start` serves the gateway API (`/v1`) and control dashboard from a single origin |
+| **Public Gateway Deployment** | ⏳ **Tracked Under Step 12** | Container image published to GHCR; persistent public HTTPS gateway pending hosting setup |
+| **Solana Settlement Logic** | ⚠️ **Unit Math Passing / Funded Blocked** | 9 unit tests pass. Funded local validator test is historically reported (PR #5) and currently blocked by missing BPF binary in git |
+
+> Detailed findings, claim reconciliations, and readiness scorecards are documented in the [Step 11 Verification Baseline](docs/step-11/VERIFICATION_BASELINE.md).
+
+---
+
+## Quickstart
 
 ### Prerequisites
-- Node.js >= 20.0.0
-- npm >= 10.0.0
+- **Node.js** >= 20.0.0 (Node 22 recommended)
+- **npm** >= 10.0.0
 
-### Installation
+### 1. Clone & Install
 ```bash
 git clone https://github.com/XiaoArnav/Shlita.git
 cd Shlita
 npm install
 ```
 
-### Run Tests
+### 2. Run Automated Verification
 ```bash
+# Run unit, integration, security, and SDK tests (106 tests)
 npm test
-```
-`npm test` runs the ledger, gateway, session, Solana, and SDK suites. One test packs `shlita-sdk` and installs that archive in a temporary project outside this repository.
 
-### Run Attack Simulation
-```bash
+# Run Playwright Chromium end-to-end browser test
+npm run test:browser
+
+# Run terminal attack simulation & circuit breaker demonstration
 npm run demo
 ```
-Demonstrates authorized micro-transactions, prompt-injection vendor blocking, per-call cap enforcement, and automatic circuit breaker tripping on recursive loops.
 
-### Build and Launch Server + Dashboard
+### 3. Build & Launch Local Gateway
 ```bash
 npm run build
 npm start
 ```
-Open [http://127.0.0.1:4000](http://127.0.0.1:4000). The default screen asks for the operator key. Add `?demo=1` for the labeled sample dashboard. The sample balances are not ledger records.
 
-A single container with a persistent volume is the supported deployment. It is not a multi-instance service. See `docs/adr/0001-single-instance-sqlite.md`, `Dockerfile`, and `compose.yaml`. Production and staging require `SHLITA_DB_PATH` to be a real file. `npm run backup` writes a SQLite backup, and `npm run restore -- <backup> <destination>` refuses to replace an existing file unless `SHLITA_RESTORE_OVERWRITE=true`. Vercel and GitHub Pages still serve only the static interface.
+Open [http://127.0.0.1:4000](http://127.0.0.1:4000) in your browser:
+- In development, an operator key is generated automatically in `.shlita/` if not set.
+- Add `?demo=1` to explore the dashboard with pre-loaded mock balance samples.
+- To configure an explicit operator key, start with `SHLITA_OPERATOR_KEY="your-32-char-secret-operator-key" npm start`.
 
-Development startup without `SHLITA_OPERATOR_KEY` generates a local operator key under `.shlita/` and does not print it. Production (`SHLITA_ENV=production`) refuses to start unless `.env.example` is copied to `.env` and the placeholders are replaced with strong values. Demo agent enrollment runs only when `SHLITA_SEED_DEMO=true` outside production. Simulation runs only when `SHLITA_ALLOW_SIMULATION=true` outside production.
+### 4. Run via Docker Compose
+A single container backed by a persistent SQLite volume is the supported production deployment model:
+
+```bash
+# Start gateway on port 4010 with persistent volume
+SHLITA_OPERATOR_KEY="your-32-char-secret-operator-key" docker compose up -d
+```
+
+Access the gateway at [http://127.0.0.1:4010](http://127.0.0.1:4010). SQLite database and backups are stored in the `shlita-data` volume mapped to `/var/lib/shlita`.
 
 ---
 
-## 6. Integration Example (Agent SDK)
+## Agent SDK Integration
 
-The installable package is `packages/sdk`, named `shlita-sdk`. It is not published to npm. Build an archive and install that archive:
+The client library is located in `packages/sdk` under the package name `shlita-sdk`.
+
+### Pack and Install
+Because `shlita-sdk` is private to this repository, pack a tarball to install in external projects:
 
 ```bash
 npm run build:sdk
-cd packages/sdk && npm pack --pack-destination /tmp/shlita-sdk
+cd packages/sdk
+npm pack --pack-destination /tmp/shlita-sdk
+```
+
+In your agent's project:
+```bash
 npm install /tmp/shlita-sdk/shlita-sdk-0.1.0.tgz
 ```
 
-The client requires Node.js 22 or newer. Pass the gateway URL explicitly. Keep the agent key in a trusted process, and use `ShlitaOperatorClient` only on a trusted backend. The full setup, including policies, timeouts, and settlement, is in [docs/sdk/quickstart.md](docs/sdk/quickstart.md). The HTTP contract is [docs/api/openapi.yaml](docs/api/openapi.yaml).
+### Code Example
+Wrap your agent's tool dispatches through `ShlitaAgentClient`:
 
 ```typescript
 import { ShlitaAgentClient } from 'shlita-sdk';
 
 const shlita = new ShlitaAgentClient({
-  apiKey: process.env.SHLITA_API_KEY!,
-  baseUrl: process.env.SHLITA_GATEWAY_URL!,
+  baseUrl: process.env.SHLITA_GATEWAY_URL || 'http://127.0.0.1:4000',
+  apiKey: process.env.SHLITA_AGENT_API_KEY!,
 });
 
+// Proxy an approved vendor request
 const result = await shlita.proxy({
-  agentId: 'research-agent',
+  agentId: 'research-agent-01',
   vendor: 'api.helius.xyz',
   method: 'POST',
   path: '/v0/token-metadata',
-  body: { mints: ['example-mint'] },
-  idempotencyKey: 'operation-unique-id',
+  body: {
+    mints: ['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'],
+  },
+  idempotencyKey: `op-${Date.now()}-${crypto.randomUUID()}`,
 });
+
+if (result.outcome === 'committed') {
+  console.log('Vendor response:', result.responseBody);
+  console.log('Accounted spend (micro-USDC):', result.reservedAmountMicroUsdc);
+} else {
+  console.error('Request blocked by Shlita policy:', result.error);
+}
 ```
 
-Runnable copies live in `examples/`. They talk to a local gateway and send `simulate: true`, so they do not call a paid provider.
-
-### cURL
+### cURL Example
 ```bash
-curl -X POST "$SHLITA_GATEWAY_URL/v1/proxy" \
-  -H "x-shlita-api-key: $SHLITA_API_KEY" \
+curl -X POST "http://127.0.0.1:4000/v1/proxy" \
+  -H "x-shlita-api-key: $SHLITA_AGENT_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "agentId": "research-agent",
+    "agentId": "research-agent-01",
     "vendor": "api.helius.xyz",
+    "method": "POST",
     "path": "/v0/token-metadata",
-    "idempotencyKey": "operation-unique-id",
+    "body": { "mints": ["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"] },
+    "idempotencyKey": "op-test-12345",
     "simulate": true
   }'
 ```
 
 ---
 
-## 7. Commercial Readiness, Staging Verification & Final Security Audit (Steps 7–10)
+## Repository Structure
 
-Shlita has undergone independent security auditing, staging deployment verification, and comprehensive release-gate evaluation across Steps 7 through 10:
-
-### Step 7 — Commercial Readiness & Security Validation Audit
-- [Readiness Audit (18 Capabilities)](docs/step-7/READINESS_AUDIT.md)
-- [Commercial Release Gates Evaluation](docs/step-7/RELEASE_GATES.md)
-- [Application Security Review & Threat Classifications](docs/step-7/SECURITY_FINDINGS.md)
-- [Controlled Pilot Architecture & Constraints](docs/step-7/PILOT_PLAN.md)
-- [Operations & Monitoring Checklist](docs/step-7/OPERATIONS_CHECKLIST.md)
-- [Commercial Assumptions vs Verified Realities](docs/step-7/COMMERCIAL_ASSUMPTIONS.md)
-- [Remaining Engineering Roadmap (Milestones A–D)](docs/step-7/REMAINING_WORK.md)
-
-### Step 8 — Pilot Deployment Blueprint & Release-Gate Closure
-- [Staging Deployment Blueprint & Ingress Topology](docs/step-8/DEPLOYMENT_BLUEPRINT.md)
-- [Step 7 Findings Closure & Gate Status](docs/step-8/STEP_7_CLOSURE.md)
-- [Pilot End-to-End Test Matrix](docs/step-8/PILOT_TEST_MATRIX.md)
-- [Pilot Operations & Guardrail Specifications](docs/step-8/PILOT_OPERATIONS.md)
-- [Site Reliability & Incident Response Runbook](docs/step-8/INCIDENT_RESPONSE.md)
-- [Developer Integration & Onboarding Guide](docs/step-8/DEVELOPER_ONBOARDING.md)
-- [Release Gate Scorecard (10 Passed, 2 Staging Blockers)](docs/step-8/RELEASE_GATES.md)
-- [Remaining Pilot Blockers & Acceptance Criteria](docs/step-8/REMAINING_BLOCKERS.md)
-- [Staging Implementation & Execution Roadmap](docs/step-8/NEXT_IMPLEMENTATION_PLAN.md)
-
-### Step 9 — Staging Deployment Verification & Controlled Pilot Testing
-- [Staging Verification & Environment Setup](docs/step-9/STAGING_VERIFICATION.md)
-- [Security & Access Control Test Results](docs/step-9/SECURITY_TEST_RESULTS.md)
-- [Financial Control & 10-Way Concurrency Verification](docs/step-9/FINANCIAL_TEST_RESULTS.md)
-- [Dashboard & Telemetry Health Results](docs/step-9/DASHBOARD_TEST_RESULTS.md)
-- [SDK Independent Consumer Verification](docs/step-9/SDK_VERIFICATION.md)
-- [Persistence, WAL Recovery & Backup Integrity](docs/step-9/PERSISTENCE_RECOVERY.md)
-- [External Deployment Readiness Assessment](docs/step-9/DEPLOYMENT_READINESS.md)
-- [Controlled Pilot Operations Runbook](docs/step-9/PILOT_RUNBOOK.md)
-- [Remaining Staging Blockers Inventory](docs/step-9/REMAINING_BLOCKERS.md)
-
-### Step 10 — Final Security Audit, Production Readiness & Go/No-Go Decision
-- [Final Comprehensive Audit & Executive Synthesis](docs/step-10/FINAL_AUDIT.md)
-- [Security Verdict & Threat Assessment (STRIDE)](docs/step-10/SECURITY_VERDICT.md)
-- [Financial Integrity & Two-Phase Commit Ledger Audit](docs/step-10/FINANCIAL_VERIFICATION.md)
-- [Solana Subscriptions & On-Chain Safety Verification](docs/step-10/SOLANA_VERIFICATION.md)
-- [Infrastructure, Container & SRE Architecture Review](docs/step-10/INFRASTRUCTURE_REVIEW.md)
-- [Documentation Inconsistencies & Blueprint Conflict Audit](docs/step-10/DOCUMENTATION_CONFLICTS.md)
-- [Master Release Gate Matrix (19 Independent Gates)](docs/step-10/RELEASE_GATES.md)
-- [Production Readiness & Four-Tier Go/No-Go Decision](docs/step-10/PILOT_GO_NO_GO.md)
-- [Commercial Production Blockers & Non-Technical Requirements](docs/step-10/COMMERCIAL_LAUNCH_BLOCKERS.md)
-- [Prioritized Remediation Roadmap & Final Recommendations](docs/step-10/FINAL_RECOMMENDATIONS.md)
+```
+shlita/
+├── packages/
+│   ├── core/                  # Financial ledger & ACID SQLite rules engine
+│   ├── gateway/               # Hono HTTP API (/v1/proxy, /v1/agents, SSRF firewall)
+│   ├── sdk/                   # Typed agent & operator SDK clients (shlita-sdk)
+│   └── solana/                # Canonical Solana Subscriptions protocol integration
+├── src/                       # React 18 + Vite + Tailwind v4 operator dashboard
+├── demo/                      # Terminal attack simulation & circuit breaker script
+├── tests/                     # 106 automated Vitest tests & Playwright browser suite
+├── examples/                  # Runnable agent client & policy pattern samples
+├── docs/                      # Architectural decision records & step audits
+│   ├── adr/                   # ADR 0001: Single-instance SQLite architecture
+│   ├── api/                   # OpenAPI 3.0 contract specification
+│   ├── sdk/                   # Developer integration & onboarding quickstart
+│   └── step-11/               # Independent audit, browser E2E, & baseline records
+├── GLOSSARY.md                # Ubiquitous domain terminology
+├── Dockerfile                 # Production Debian Bookworm Slim container
+└── compose.yaml               # Docker Compose specification with persistent volume
+```
 
 ### Step 11 — Independent Engineering Baseline & Evidence Reconciliation
 - [Step 11 Baseline Verification Report](docs/step-11/BASELINE_VERIFICATION.md)
@@ -261,11 +243,40 @@ Shlita has undergone independent security auditing, staging deployment verificat
 ### Step 12 — Persistent HTTPS Staging Deployment
 - [Step 12 Staging Verification Report](docs/step-12/STAGING_VERIFICATION.md)
 - **Deployment Spec:** Single-instance container behind Caddy 2 TLS reverse proxy (`compose.staging.yaml`, `Caddyfile`)
-- **Staging Gateway URL:** `https://gateway.staging.shlita.xyz` *(locked staging; live public DNS/TLS pending cloud host provisioning)*
+- **Planned Staging Gateway URL:** `https://gateway.staging.shlita.xyz` *(planned locked staging endpoint; live public DNS/TLS pending cloud host provisioning)*
 - **Persistence & SRE:** SQLite WAL persistent volume at `/var/lib/shlita`, automated nightly `VACUUM INTO` snapshots with retention pruning, off-volume backup replication, and automated image rollback (`scripts/rollback.sh`).
 
 ---
 
-## 8. License
+## Audit & Verification Reports
+
+Every roadmap step produces permanent, independently auditable engineering artifacts:
+
+| Milestone | Report Focus | Key Documents |
+|---|---|---|
+| **Step 12** | Persistent HTTPS Staging | [Staging Verification](docs/step-12/STAGING_VERIFICATION.md) • [Deployment Blueprint](docs/step-8/DEPLOYMENT_BLUEPRINT.md) • [Rollback Runbook](scripts/rollback.sh) |
+| **Step 11** | Engineering Baseline & Browser E2E | [Verification Baseline](docs/step-11/VERIFICATION_BASELINE.md) • [Browser E2E Report](docs/step-11/DASHBOARD_BROWSER_VERIFICATION.md) • [Claim Register](docs/step-11/CLAIM_EVIDENCE_REGISTER.md) • [Solana Reconciliation](docs/step-11/SOLANA_EVIDENCE_RECONCILIATION.md) |
+| **Step 10** | Security Audit & Production Gates | [Final Audit Synthesis](docs/step-10/FINAL_AUDIT.md) • [Security Verdict](docs/step-10/SECURITY_VERDICT.md) • [Master Release Gates](docs/step-10/RELEASE_GATES.md) • [Go/No-Go Decision](docs/step-10/PILOT_GO_NO_GO.md) |
+| **Step 9** | Staging Verification & Pilot Testing | [Staging Verification](docs/step-9/STAGING_VERIFICATION.md) • [10-Way Concurrency](docs/step-9/FINANCIAL_TEST_RESULTS.md) • [Persistence Recovery](docs/step-9/PERSISTENCE_RECOVERY.md) |
+| **Step 8** | Pilot Blueprint & Ingress Topology | [Deployment Blueprint](docs/step-8/DEPLOYMENT_BLUEPRINT.md) • [Incident Runbook](docs/step-8/INCIDENT_RESPONSE.md) • [Developer Onboarding](docs/step-8/DEVELOPER_ONBOARDING.md) |
+| **Step 7** | Readiness & Threat Classifications | [Readiness Audit](docs/step-7/READINESS_AUDIT.md) • [Security Findings](docs/step-7/SECURITY_FINDINGS.md) • [Pilot Plan](docs/step-7/PILOT_PLAN.md) |
+
+---
+
+## Backup & Maintenance CLI
+
+Shlita includes built-in SQLite backup and safe restore utilities:
+
+```bash
+# Safely snapshot the SQLite ledger in WAL mode
+npm run backup
+
+# Restore a snapshot to a target destination
+npm run restore -- /path/to/backup.db /var/lib/shlita/ledger.db
+```
+
+---
+
+## License
 
 MIT © [XiaoArnav](https://github.com/XiaoArnav)

@@ -60,7 +60,7 @@ Three contradictions found in existing docs (see `CLAIM_EVIDENCE_REGISTER.md`):
 - Health endpoint: `/healthz` → `/health` and `/ready`
 
 ### P8 — Browser E2E Test (COMPLETED IN STEP 11)
-Resolved in Step 11 via Playwright and Chromium. Verified in [GitHub Actions CI run 43374212468](https://github.com/XiaoArnav/Shlita/actions/runs/43374212468) using `npm run test:browser`. It records one passing Playwright Chromium test covering:
+Resolved in Step 11 via Playwright and Chromium. Verified in [GitHub Actions run 43374212468](https://github.com/XiaoArnav/Shlita/actions/runs/43374212468) using the command `npm run test:browser`. It records one passing Playwright Chromium test covering:
 1. Operator sign-in and session cookie initialization
 2. Agent enrollment and single-view API key issuance
 3. Live spend and telemetry updates without reloading

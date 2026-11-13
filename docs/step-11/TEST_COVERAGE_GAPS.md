@@ -43,7 +43,7 @@
 
 ## Dashboard Browser E2E Verification Resolved in Step 11 (1 test)
 
-Resolved in Step 11 via Playwright and Chromium. Verified in [GitHub Actions CI run 43374212468](https://github.com/XiaoArnav/Shlita/actions/runs/43374212468) using the command `npm run test:browser`.
+Resolved in Step 11 via Playwright v1.65.0 and Chromium. Verified in [GitHub Actions run 43374212468](https://github.com/XiaoArnav/Shlita/actions/runs/43374212468) using the command `npm run test:browser`.
 
 The suite (`tests/step-11/dashboard.browser.test.ts`) records one passing Playwright Chromium test covering:
 1. Operator sign-in and session cookie initialization
