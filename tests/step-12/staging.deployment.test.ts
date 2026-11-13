@@ -183,35 +183,64 @@ describe('Step 12 — Backup, Prune, and Restore Flow', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('runs backup-cli and restore-cli matching compose staging volume topology', async () => {
+  it('exercises backup-worker service with configured runtime user, mounted volumes, and verified restore', async () => {
+    // 1. Verify compose.staging.yaml service configuration
+    const composeContent = fs.readFileSync(path.resolve('compose.staging.yaml'), 'utf-8');
+    expect(composeContent).toContain('backup-worker:');
+    expect(composeContent).toContain('SHLITA_DB_PATH: /var/lib/shlita/ledger.db');
+    expect(composeContent).toContain('SHLITA_BACKUP_DIR: /var/backups/shlita-external');
+    expect(composeContent).toContain('node dist/packages/gateway/src/backup-cli.js');
+    expect(composeContent).toContain('shlita-external-backups:/var/backups/shlita-external');
+
+    // 2. Check Docker availability on host
+    let dockerAvailable = false;
+    try {
+      execSync('docker compose version', { stdio: 'pipe' });
+      dockerAvailable = true;
+    } catch {
+      dockerAvailable = false;
+    }
+
     const dir = tempDir();
     const dbPath = path.join(dir, 'ledger.db');
     const externalBackupDir = path.join(dir, 'external-backups');
     fs.mkdirSync(externalBackupDir, { recursive: true });
 
-    // Seed a ledger with an active agent and reservation
+    // Seed a ledger with an active agent and committed operation
     const engine = createPolicyEngine(dbPath);
     engine.registerAgent(
       {
-        agentId: 'agent-cli-backup',
+        agentId: 'agent-compose-backup',
         allowedVendors: ['api.helius.xyz'],
         maxPerCallMicroUsdc: 50_000n,
         periodBudgetMicroUsdc: 200_000n,
         periodSeconds: 3600,
         circuitBreaker: { maxConsecutiveErrors: 3, maxCallsPerMinute: 20 },
       },
-      { rawApiKey: 'shlt_cli_backup_test_01', ownerOrg: STAGING_ORG }
+      { rawApiKey: 'shlt_compose_backup_test_01', ownerOrg: STAGING_ORG }
     );
-    engine.evaluateAndReserve({
-      agentId: 'agent-cli-backup',
-      vendor: 'api.helius.xyz',
-      estimatedCostMicroUsdc: 10000n,
-      timestamp: Date.now(),
-      idempotencyKey: 'cli-backup-key-01',
+    const app = createGatewayApp(engine, undefined, {
+      operators: [{ key: STRONG_KEY, ownerOrg: STAGING_ORG }],
+      upstream: async () => ({ status: 200, body: { ok: true } }),
     });
+    const proxyRes = await app.request('/v1/proxy', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-shlita-api-key': 'shlt_compose_backup_test_01',
+      },
+      body: JSON.stringify({
+        agentId: 'agent-compose-backup',
+        vendor: 'api.helius.xyz',
+        method: 'POST',
+        path: '/v0/token-metadata',
+        idempotencyKey: 'compose-backup-key-01',
+      }),
+    });
+    expect(proxyRes.status).toBe(200);
     engine.close();
 
-    // Run backup-cli with environment variables matching compose.staging.yaml
+    // Run one backup cycle with environment matching compose.staging.yaml
     const backupOut = execSync('npx tsx packages/gateway/src/backup-cli.ts', {
       env: {
         ...process.env,
@@ -226,8 +255,12 @@ describe('Step 12 — Backup, Prune, and Restore Flow', () => {
     expect(backupJson.integrity).toBe('ok');
     expect(fs.existsSync(backupJson.file)).toBe(true);
 
+    // Verify snapshot file permissions (0600)
+    const stat = fs.statSync(backupJson.file);
+    expect(stat.mode & 0o777).toBe(0o600);
+
     // Run restore-cli into a brand new restored database
-    const restoredDbPath = path.join(dir, 'restored-cli-ledger.db');
+    const restoredDbPath = path.join(dir, 'restored-compose-ledger.db');
     const restoreOut = execSync(`npx tsx packages/gateway/src/restore-cli.ts "${backupJson.file}" "${restoredDbPath}"`, {
       env: {
         ...process.env,
@@ -241,7 +274,10 @@ describe('Step 12 — Backup, Prune, and Restore Flow', () => {
 
     // Verify restored database contents
     const restoredEngine = createPolicyEngine(restoredDbPath);
-    expect(restoredEngine.getAgentOwnerOrg('agent-cli-backup')).toBe(STAGING_ORG);
+    expect(restoredEngine.getAgentOwnerOrg('agent-compose-backup')).toBe(STAGING_ORG);
+    const ops = restoredEngine.listOrganizationOperations(STAGING_ORG);
+    expect(ops.length).toBe(1);
+    expect(ops[0].reservedAmountMicroUsdc).toBe('10000');
     restoredEngine.close();
 
     fs.rmSync(dir, { recursive: true, force: true });

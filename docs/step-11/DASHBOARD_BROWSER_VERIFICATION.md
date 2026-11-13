@@ -32,7 +32,7 @@ The browser test verifies the following sequential flows:
 - **Action:** Navigates to `http://localhost:4077/`.
 - **Assertion:** Heading `Operator sign-in` and note `"The key is checked by the gateway and is not stored in this browser."` are visible.
 - **Action:** Enters 32-character operator key (`playwright-test-operator-key-32chars-xyz`) into password input and clicks `"Sign in"`.
-- **Assertion:** `POST /v1/session` returns 200, sets `HttpOnly; SameSite=Strict` cookie, and reveals the authenticated view with heading `Live ledger` and text `Organization org-browser-audit.`.
+- **Assertion:** `POST /v1/session` returns 200, sets `HttpOnly; SameSite=Lax` cookie, and reveals the authenticated view with heading `Live ledger` and text `Organization org-browser-audit.`.
 
 ### Step 2: Agent Enrollment
 - **Action:** Fills agent enrollment form (`agentId: 'agent-browser-audit-01'`, `vendor: 'api.helius.xyz'`, `perCall: '50000'`, `budget: '1000000'`) and clicks `"Enroll agent"`.
