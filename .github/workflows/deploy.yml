@@ -160,6 +160,11 @@ jobs:
           docker rm -f shlita-step5
           docker volume rm shlita-step5
 
+      - name: Verify Compose backup worker service
+        run: |
+          export SHLITA_IMAGE="shlita:step5"
+          bash scripts/verify-compose-backup-worker.sh
+
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment:

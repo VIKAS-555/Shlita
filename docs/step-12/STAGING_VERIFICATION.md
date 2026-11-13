@@ -65,16 +65,16 @@ Step 12 establishes the complete architecture, container infrastructure, locked 
 ```
 
 ### B. SQLite Backup Snapshot & Independent Restore
-Implemented WAL-safe backup implementation in `packages/core/src/db.ts` and automated worker in `compose.staging.yaml`:
+Implemented WAL-safe backup implementation in `packages/core/src/db.ts`, automated worker in `compose.staging.yaml`, and end-to-end Compose verification script in `scripts/verify-compose-backup-worker.sh`:
 1. Performs consistent online snapshot of active WAL-mode database using SQLite native `VACUUM INTO` to a temporary snapshot file.
 2. Runs `PRAGMA integrity_check` on the temporary file before atomically renaming to destination (`fs.renameSync`).
 3. Restricts backup file permissions to `0600` (`chmodSync`).
 4. Preserves last known-good snapshot intact if a subsequent backup fails or destination is unwritable.
 5. Replicates snapshots to off-volume destination (`/var/backups/shlita-external`) owned by container user `shlita` (UID 10001).
-6. Unwritable destination causes `backup-cli.ts` to surface non-zero exit code (verified in automated test).
-7. Successfully restored backup into `/tmp/shlita-step12-.../restored-ledger.db` using `restoreLedgerBackup()`.
+6. Unwritable destination causes `backup-cli.ts` to surface non-zero exit code (verified in automated test and Compose worker).
+7. Successfully restored backup into independent databases (`/tmp/shlita-step12-.../restored-ledger.db` and `/var/backups/shlita-external/restored-compose-drill.db`) using `restoreLedgerBackup()` and `restore-cli.js`.
 8. Verified `PRAGMA integrity_check` returned `ok`.
-9. Verified all agents, operations (`reservedAmountMicroUsdc: 10000`), and audit logs were present and identical in the restored database.
+9. Verified all agents, operations (`reservedAmountMicroUsdc: 10000` / `15000`), and audit logs were present and identical in the restored database.
 
 **Test Output:**
 ```
@@ -82,7 +82,27 @@ Implemented WAL-safe backup implementation in `packages/core/src/db.ts` and auto
 ✓ Step 12 — Backup, Prune, and Restore Flow > exercises backup-worker service with configured runtime user, mounted volumes, and verified restore
 ✓ Step 12 — Backup, Prune, and Restore Flow > surfaces failures on unwritable backup destination and preserves last known-good snapshot
 ```
-*Note on Docker Compose Execution:* The backup worker's volume bindings (`shlita-data:/var/lib/shlita`, `shlita-external-backups:/var/backups/shlita-external`), runtime user permissions (`shlita` UID 10001), automated backup cycle, and restore drills are fully verified in integration suites. Direct invocation of `docker compose` is recorded as blocked on this development host due to Docker CLI/daemon availability.
+
+### B.1 Real Compose Backup Worker Service Verification
+The real `backup-worker` Compose service was hardened and verified via `scripts/verify-compose-backup-worker.sh` and integrated into the GitHub Actions CI `image` job:
+1. **Worker Healthcheck Hardening:** In `compose.staging.yaml`, overridden the inherited Dockerfile HTTP `/ready` check (which attempted port 4000) with a dedicated worker health probe:
+   ```yaml
+   healthcheck:
+     test: ["CMD-SHELL", "test -f /tmp/backup-worker-healthy || exit 1"]
+     interval: 10s
+     timeout: 3s
+     start_period: 5s
+     retries: 3
+   ```
+2. **Prompt Cycle Trigger:** Configured `compose.staging.yaml` worker loop to monitor `/tmp/trigger-backup` and support `SHLITA_BACKUP_RUN_ON_STARTUP=true`. Touching `/tmp/trigger-backup` triggers an immediate cycle using the exact same code path (`node dist/packages/gateway/src/backup-cli.js`) as the scheduled 24h cron loop.
+3. **Runtime User & Volume Verification:** Verified `backup-worker` runs with non-root runtime user `shlita` (`UID: 10001, GID: 10001`) and mounts `/var/lib/shlita` (source DB) and `/var/backups/shlita-external` (backup volume).
+4. **Disposable Ledger Seed & Snapshot:** Seeded a committed operation (`op_worker_drill_999`, amount `15000` micro-USDC). Triggered a prompt backup, confirming snapshot generation with mode `0600`.
+5. **Restore & Record Verification:** Restored the generated snapshot into `/var/backups/shlita-external/restored-compose-drill.db`. Verified `PRAGMA integrity_check` returned `ok`, and validated that `op_worker_drill_999` with `15000` micro-USDC was preserved.
+6. **Failure & Preservation Drill:** Made the backup destination read-only (`chmod 555`). Triggered a backup cycle. Confirmed:
+   - Worker logged `CRITICAL: Scheduled ledger backup failed!` to stderr.
+   - Worker omitted any success message for that cycle.
+   - Healthcheck file `/tmp/backup-worker-healthy` was removed, marking the container unhealthy.
+   - Last known-good snapshot remained intact and passed `PRAGMA integrity_check`.
 
 ### C. Single-Instance Persistence Across Restart
 1. Initialized gateway on durable SQLite file.

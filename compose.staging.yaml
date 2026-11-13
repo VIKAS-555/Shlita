@@ -4,7 +4,7 @@ services:
     container_name: shlita-staging-gateway
     restart: unless-stopped
     ports:
-      - "127.0.0.1:4000:4000"
+      - "127.0.0.1:${PORT:-4000}:4000"
     environment:
       SHLITA_ENV: staging
       PORT: "4000"
@@ -61,25 +61,66 @@ services:
       - /bin/sh
       - -c
       - |
-        echo "Starting Shlita automated backup worker (interval: 86400s)..."
-        while true; do
-          sleep 86400
+        INTERVAL=$${SHLITA_BACKUP_INTERVAL_SECONDS:-86400}
+        TRIGGER_FILE="/tmp/trigger-backup"
+        HEALTH_FILE="/tmp/backup-worker-healthy"
+
+        touch "$$HEALTH_FILE"
+        echo "Starting Shlita automated backup worker (interval: $${INTERVAL}s)..."
+
+        run_backup() {
           echo "Running scheduled ledger backup..."
-          if ! node dist/packages/gateway/src/backup-cli.js; then
-            echo "CRITICAL: Scheduled ledger backup failed!" >&2
-          else
+          if node dist/packages/gateway/src/backup-cli.js; then
             echo "Scheduled backup completed."
+            touch "$$HEALTH_FILE"
+            return 0
+          else
+            echo "CRITICAL: Scheduled ledger backup failed!" >&2
+            rm -f "$$HEALTH_FILE"
+            return 1
+          fi
+        }
+
+        if [ "$${SHLITA_BACKUP_RUN_ON_STARTUP:-false}" = "true" ] || [ "$${SHLITA_BACKUP_RUN_ON_STARTUP:-0}" = "1" ]; then
+          run_backup || true
+        fi
+
+        if [ "$${SHLITA_BACKUP_ONCE:-false}" = "true" ] || [ "$${SHLITA_BACKUP_ONCE:-0}" = "1" ]; then
+          echo "Single backup execution complete."
+          exit 0
+        fi
+
+        slept=0
+        while true; do
+          if [ -f "$$TRIGGER_FILE" ]; then
+            rm -f "$$TRIGGER_FILE"
+            echo "Immediate backup trigger requested via $$TRIGGER_FILE"
+            run_backup || true
+            slept=0
+          fi
+          sleep 1
+          slept=$$((slept + 1))
+          if [ "$$slept" -ge "$$INTERVAL" ]; then
+            run_backup || true
+            slept=0
           fi
         done
     environment:
       SHLITA_DB_PATH: /var/lib/shlita/ledger.db
       SHLITA_BACKUP_DIR: /var/backups/shlita-external
       SHLITA_BACKUP_RETENTION: "14"
+      SHLITA_BACKUP_INTERVAL_SECONDS: "86400"
     volumes:
       - shlita-data:/var/lib/shlita
       - shlita-external-backups:/var/backups/shlita-external
     networks:
       - shlita-net
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/backup-worker-healthy || exit 1"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
     depends_on:
       gateway:
         condition: service_healthy

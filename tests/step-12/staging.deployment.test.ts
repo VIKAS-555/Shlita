@@ -191,6 +191,10 @@ describe('Step 12 — Backup, Prune, and Restore Flow', () => {
     expect(composeContent).toContain('SHLITA_BACKUP_DIR: /var/backups/shlita-external');
     expect(composeContent).toContain('node dist/packages/gateway/src/backup-cli.js');
     expect(composeContent).toContain('shlita-external-backups:/var/backups/shlita-external');
+    expect(composeContent).toContain('TRIGGER_FILE="/tmp/trigger-backup"');
+    expect(composeContent).toContain('HEALTH_FILE="/tmp/backup-worker-healthy"');
+    expect(composeContent).toContain('test -f /tmp/backup-worker-healthy');
+    expect(composeContent).toContain('SHLITA_BACKUP_RUN_ON_STARTUP');
 
     // 2. Check Docker availability on host
     let dockerAvailable = false;
